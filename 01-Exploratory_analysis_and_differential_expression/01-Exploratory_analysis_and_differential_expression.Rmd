@@ -1,0 +1,1007 @@
+---
+title: "1-Exploratory analysis and differential expression"
+author: "Katarina Prskalo"
+date: "`r format(Sys.time(), '%d %b, %Y')`"
+output:
+  html_document:
+    css: style.css
+---
+
+# Description
+
+This notebook contains analysis of mRNA, microRNA and DNAm data. mRNA
+data is previously unpublished, although MiR and DNAm data is:  
+MiR:
+<https://pubmed.ncbi.nlm.nih.gov/30783190/>  
+DNAm:
+<https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7554960/>  
+This is the first notebook that generates results required for further analysis so
+it should be ran first. The information about libraries and versions
+used while writing this notebook are provided in the bottom via
+sessionInfo() function.\
+The aim in this project is to make an multi-omics integrative analysis
+of HNSC tumor samples. High-throughput sequencing of mRNA and microRNA
+was preformed. Exploratory data analysis and differential expression
+analysis was preformed according to the DESeq2 vignette. DNAm data was
+generated Illumina Infinium Methylation EPIC BeadChip that contains
+\~900k CpG's.
+
+# Libraries
+
+```{r Libraries, message=FALSE}
+library(rmarkdown)
+library(BiocManager)
+library(GenomicFeatures)
+library(stringr)
+library(tximport)
+library(DESeq2)
+library(pheatmap)
+library(RColorBrewer)
+library(ggplot2)
+library(ggrepel)
+library(gprofiler2)
+library(RnBeads)
+library(RnBeads.hg19)
+library(readxl)
+library(plyranges)
+library(rprojroot)
+
+# source(file = file.path(getwd(), "scripts", "idMap.R"))
+# source(file = file.path(getwd(), "scripts", "triangleHeatMap.R"))
+
+source(file = file.path(find_rstudio_root_file(),"Scripts", "utils.R"))
+
+genes_dir <- file.path(find_rstudio_root_file(), "Scripts", "genes.hg19.ensembl.rds")
+```
+
+# mRNA
+
+In this chapter Data analysis of mRNA data is preformed.
+
+### Raw data
+
+Raw data was provided by Sabol and dowloaded from cloud:\
+<https://irbhr-my.sharepoint.com/:f:/g/personal/ivan_sabol_irb_hr/Eq5MRE0xi8pNuNOuwWQ-vb0BT6MaSxwmp97PKUF97YRoxg?e=gA69Fb>\
+Data demultiplexing was preformed with script:
+???
+Building index with: For RNA seq mapping index is built from the gencode
+transcirpt data from hg19 assembly:
+<https://www.gencodegenes.org/human/release_19.html> The bash call for
+salmon to build the index is this:
+```{bash}
+    salmon index -t gencode.v19.pc_transcripts.fa.gz -i homosapiens_hg19_gencode_transcripts
+```
+Mapping with Salmon. Mapping was done on a cluster with salmon tool. the
+Folder has to contain folder with data (mRNA_data) and the index file
+that was built. Data is saved in individual folders that are named
+OV401, OV402, ... OV413.
+```{bash}
+    for fn in mRNA_data/OV{401..413};
+    do
+    samp=`basename ${fn}`
+    echo "Processing sample ${samp}"
+    salmon quant -i homosapiens_hg19_gencode_transcripts -l A -p 6 --validateMappings --gcBias --numGibbsSamples 20 -o quants/${samp}_quant -1 ${fn}/${samp}_1.fastq.gz -2 ${fn}/${samp}_2.fastq.gz
+    done 
+```
+
+
+
+
+### Loading data
+
+```{r mRNA loading data}
+#reading coldata 
+dir <- file.path(getwd(), "data")
+mRNA_coldata <- 
+  read.csv(file.path(dir, "SampleLIST_mRNA_Grce_15.10.2018.csv"),
+           row.names=1, sep=",", 
+           stringsAsFactors=FALSE)
+
+#adding file path of quants for tximport
+mRNA_coldata$files <- 
+  file.path(dir,
+            "mRNA_quants_hg19",
+            paste0(mRNA_coldata$BASESPACE.NAME,"_quant"),
+            "quant.sf")
+
+#Check if everything is okay
+file.exists(mRNA_coldata$files)
+```
+
+**Tximport**\
+This function maps transcript id's to gene id's. Firstly we make an txdb
+object from the gff3 file. Then build an tx2gene object which contains
+ensembl gene ids and txids from salmon. After tx2gene object is built we
+input it in the tximport function. Next we can build an DESeq object
+wiht DESeqDataSetFromTximport function. gff3 file -
+<https://www.gencodegenes.org/human/release_19.html>
+```{bash}
+wget -P data https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_19/gencode.v19.annotation.gff3.gz
+```
+
+
+```{r txdb long time, message=FALSE, eval=FALSE}
+#fetching database for mapping gene id to transcript name
+txdb <- makeTxDbFromGFF(file.path(dir, "gencode.v19.annotation.gff3.gz"))
+
+k <- keys(txdb, keytype = "TXNAME")
+tx2gene <- AnnotationDbi::select(txdb,k,"GENEID", "TXNAME")
+
+saveRDS(tx2gene, file = file.path(getwd(), "outputs/RDS/tx2gene.rds"))
+```
+
+Separating these two chunks to make the code faster
+
+```{r tximport, message=FALSE, eval=TRUE}
+tx2gene <- readRDS(file.path(getwd(), "outputs/RDS/tx2gene.rds"))
+
+#parsing txnames
+tx2gene$TXNAME <- str_split(tx2gene$TXNAME,pattern = "\\.",
+                            simplify =T)[,1]
+
+
+# importing quantification data
+txi <- tximport(mRNA_coldata$files,
+                type="salmon", 
+                tx2gene=tx2gene,
+                ignoreTxVersion=T,
+                ignoreAfterBar=T)
+
+```
+
+**Building dds object**\
+dds (DeseqDataSet) objects are custom DESeq class of
+SummarizedExperiments class from Bioconductor. dds object contains all information about the transcriptome. Counts, sample annotation data,...  
+Filtering out low count genes.
+```{r mRNA dds, message=FALSE}
+# building mRNA dds object
+mRNA_dds <- 
+  DESeqDataSetFromTximport(txi, mRNA_coldata, design= ~ Hist + Tissue + HPV)
+
+# trimming rownames to remove the suffix
+rownames(mRNA_dds) <- str_split(rownames(mRNA_dds),"\\.", simplify = T)[,1]
+
+# adding colnames
+colnames(mRNA_dds) <- mRNA_coldata$Sample.ID
+
+# filtering rows low counts
+keep <- rowSums(counts(mRNA_dds)) > 10
+mRNA_dds <- mRNA_dds[keep,]
+
+dim(mRNA_dds)
+```
+Counts data:
+```{r mRNA dds coutns}
+head(counts(mRNA_dds))
+```
+
+### Exploratory analysis
+
+For exploratory analysis as PCA plot and sample distance first preform variance stabilization. Number of samples is low (< 30) function for transforming data is rlog as suggested in the DESeq vignette. 
+```{r mRNA rlog transformation, message=FALSE}
+mRNA_rld <- DESeq2::rlog(mRNA_dds)
+```
+
+**PCA plot**  
+PCA plot converts the correlations (or lack there of) among all of the samples into a 2-D graph. Highly correlated samples cluster together. It is a version of a dimension reduction method. Also, the axis are ordered by importanc or how much of the variance in the data they represent. 
+```{r mRNA PCA plot}
+# selecting data for plotting pca
+mRNA_pcadata <- 
+  DESeq2::plotPCA(mRNA_rld, 
+                  intgroup = c("Hist", "HPV", "Tissue"),
+                  returnData = TRUE)
+# selecting variance
+percentVar <- round(100 * attr(mRNA_pcadata, "percentVar"))
+
+
+# plotting pca data
+ggplot(mRNA_pcadata, aes(x = PC1, y = PC2, color = as.character(HPV), shape = Hist)) +
+  geom_point(size =3) +
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+   theme(panel.grid = element_blank(), 
+         panel.background = element_rect(fill = "white"), 
+  panel.border = element_rect(fill = "transparent"))+
+  coord_fixed() +
+  ggtitle("PCA with rlog data")+
+  scale_color_manual(values = c("firebrick1","forestgreen","blue1"))+
+  #geom_text_repel(aes(label = colData(mRNA_rld)$Sample.ID), size =3)
+  geom_text_repel(aes(label = colData(mRNA_rld)$GRCE.NAME), size =3)
+
+```
+
+**Sample distance**  
+To asses overall similarity between samples we
+calculate sample distance using the R function dist to calculate the
+Euclidean distance.
+
+Triangle sample distance heatmap
+
+```{r mRNA sample distance heatmap-triangle, message=FALSE}
+mRNA_annot_row <- as.data.frame(colData(mRNA_rld)[,c("Hist","Tissue", "HPV")])
+
+# Calling the local funciton
+## 06.07. - nista to jer sam izgubila funkciju
+# triangleHeatMap(assay(mRNA_rld),
+#                 annot_row = mRNA_annot_row,
+#                 triangle.diagonal=F)
+
+
+```
+
+### Differential expression analysis
+
+The call to DESeq function preforms the estimation of size factors,
+estimation of dispersion values and fits a generalized linear model.
+```{r mRNA Running the DESeq function, cache=FALSE, message=FALSE}
+mRNA_dds <- DESeq(mRNA_dds, betaPrior = T)
+```
+
+Differential expression on cancer control group
+```{r mRNA DE cancer-control}
+mRNA_res <- results(mRNA_dds, contrast = c("Hist","cancer","control"))
+
+mRNA_res
+```
+
+Some summary statistic
+```{r mRNA summary stat}
+summary(mRNA_res, alpha=0.05)
+```
+
+```{r significantly DE mRNA}
+mRNA_DE <- dplyr::filter(as.data.frame(mRNA_res), padj < 0.05)
+
+summary(mRNA_DE)
+hist(mRNA_DE$log2FoldChange, border="white", col="darkgreen", breaks = 50)
+hist(log(mRNA_DE$baseMean), border="white", col="darkblue", breaks = 50)
+```
+
+**GSEA on DE mRNA**  
+In the next chunk gene set enrichment analysis is preformed on DE mRNA data.  
+Most of the significant terms appear to be about muscle contraction. Other terms that appear are signaling, cell-cell communication, immune system processes
+```{r gsea on DE mRNA}
+# Using only part of sources
+GSEA_SOURCES <- c("GO:BP","CORUM","KEGG","REAC","WP","MIRNA", "TF")
+
+
+# Call on the gost 
+gost_mRNA <- 
+  gost(rownames(mRNA_DE),
+       organism= "hsapiens",
+       exclude_iea=TRUE,
+       domain_scope="annotated",
+       ordered_query=F,
+       sources=GSEA_SOURCES)
+
+# Change query name
+gost_mRNA$result$query <- "DE genes vs genome"
+
+#Plot and table of significant results
+gostplot(gost_mRNA ,capped = F, interactive = T)
+
+publish_gostplot(gostplot(gost_mRNA ,capped = F, interactive = F),
+                 highlight_terms = read.csv("inputs/GSEA_terms/gost_mRNA_terms.txt", 
+                                            header = F)[,1],
+                 filename = "outputs/figures/gost_plot_mRNA_highlighted.png")
+```
+
+DE genes on background. Results are similar, which leads to conclude
+that all sequenced data is covering most of the genes.
+```{r gsea mRNA DE on custom bg}
+# Call on the gost 
+gost_mRNA <- 
+  gost(rownames(mRNA_DE),
+       organism= "hsapiens",
+       exclude_iea=TRUE,
+       domain_scope="custom",
+       custom_bg=rownames(mRNA_res),
+       ordered_query=F,
+       sources=GSEA_SOURCES)
+
+# Change query name
+gost_mRNA$result$query <- "DE genes vs sequenced genes"
+
+#Plot and table of significant results
+gostplot(gost_mRNA ,capped = F, interactive = T)
+```
+
+**HPV effect on cancer**  
+In the next chunk explores the effect of HPV on
+cancer. To be more precise, it explores which genes are DE in HPV in
+cancer. Firstly compare HPV - and controls to get a list of genes that
+re DE in cancer samples. Secondly, compare HPV + and HPV - samples and
+exclude genes from the previous comparison.
+```{r mRNA HPV effect on cancer, message=FALSE}
+# making another dds object with different design
+mRNA_dds_HPV <- mRNA_dds
+
+# New column in colData for design
+colData(mRNA_dds_HPV)$HistHPV <-
+  as.factor(paste0(colData(mRNA_dds_HPV)$Hist,colData(mRNA_dds_HPV)$HPV))
+
+# setting the HistHPV des
+design(mRNA_dds_HPV) =~ HistHPV
+
+# Running the DESeq function
+mRNA_dds_HPV <- DESeq(mRNA_dds_HPV, betaPrior = T)
+
+# Contrasting between negative HPV and controls
+res.cN.nN <- 
+  #results(mRNA_dds_HPV, contrast=c("HistHPV","cancerN","normalN"), tidy = T)
+  results(mRNA_dds_HPV, contrast=c("HistHPV","cancer0","control0"), tidy = T)
+# Contrasting between HPV negative and positive
+res.cP.cN <- 
+  #results(mRNA_dds_HPV, contrast=c("HistHPV","cancerP","cancerN"), tidy = T)
+  results(mRNA_dds_HPV, contrast=c("HistHPV","cancer1","cancer0"), tidy = T)
+
+# selecting significant results
+res.cP.cN <- dplyr::filter(res.cP.cN, padj < 0.1)
+res.cN.nN <- dplyr::filter(res.cN.nN, padj < 0.1)
+
+#  
+mRNA_res_HPV <- res.cP.cN[!is.element(res.cP.cN$row, res.cN.nN$row),]
+mRNA_res_HPV$symbol <- idMap(mRNA_res_HPV$row, genes_dir)
+
+head(mRNA_res_HPV)
+
+```
+
+**GSEA on HPV effect**  
+Gene set analysis on HPV related DE mRNA. Showing also non significant results.
+```{r mRNA GSEA on HPV effect}
+
+gost_HPV <- 
+  gost(mRNA_res_HPV$row,
+       organism= "hsapiens",
+       exclude_iea=FALSE,
+       ordered_query=F,
+       significant=F,
+       sources=GSEA_SOURCES)
+
+# Change query name
+gost_HPV$result$query <- "DE HPV related genes vs genome"
+
+#Plot and table of significant results
+gostplot(gost_HPV, capped = F, interactive = T)
+
+```
+
+**Volcano plot**
+
+```{r mRNA volcano plot}
+volcano <- mRNA_res
+LFC.TRESH <- 1
+PVAL.TRESH <- 0.05
+
+# Building volcano plot
+volcano <- as.data.frame(mRNA_res) %>% 
+  dplyr::filter(!is.na(padj)) %>% #filtering NA's
+  dplyr::mutate(diffexpressed = dplyr::case_when(
+    padj < PVAL.TRESH & log2FoldChange > LFC.TRESH ~ "UP",
+    padj < PVAL.TRESH & log2FoldChange < -LFC.TRESH ~ "DOWN",
+    TRUE ~ "NO")) 
+
+# Getting hgnc symbols for plotting
+volcano$hgnc_symbol <- idMap(rownames(volcano), genes_dir )
+
+
+# Volcano colors
+volcano_cols <- c("red", "gray60", "green")
+
+# p value tresh for delabeling
+p_volcano_tresh <- arrange(volcano,padj)[12, "padj"]
+
+volcano <- volcano %>%
+  mutate(delabel = ifelse(padj <= p_volcano_tresh,
+                          hgnc_symbol,
+                          NA))
+  
+
+ggplot(data=as.data.frame(volcano), 
+       aes(x=log2FoldChange, 
+           y=-log10(padj), 
+           col=diffexpressed))+
+  geom_point()+
+  theme_minimal()+
+  scale_color_manual(values = volcano_cols)
+
+ggplot(data=as.data.frame(volcano), 
+       aes(x=log2FoldChange, 
+           y=-log10(padj), 
+           col=diffexpressed))+
+  geom_point()+
+  theme_minimal()+
+  scale_color_manual(values = volcano_cols)+
+  geom_text_repel(aes(label = delabel), show.legend = FALSE,
+                  size =3, max.overlaps = 50)
+
+```
+
+**Counts plot**\
+Visualizing counts for genes
+
+```{r mRNA counts plot overexpressed in cancer}
+# Using the list of genes that are labeled in volcano plot
+genes <- rownames(filter(volcano, !is.na(delabel)))
+
+# Building an object for multiple counts plot
+op <- par(mfrow = c(3,4),
+          oma = c(2,2,0,0) + 1,
+          mar = c(0,0,1,1) + 1.2)
+# Plotting
+for(gene in genes){
+  plotCounts(mRNA_dds, gene = gene, intgroup = c("Hist"),
+             returnData = F, pch = 19, main=idMap(gene, genes_dir))
+}
+par(op)
+```
+
+# miR
+
+### Raw data
+
+Raw sequencing data was previously analyzed and published. Since it was
+approved this notebook will start with a count matrix that was mapped
+with smallRNA Basepace application. It was also provided by Sabol and is
+located in the cloud linked in the mRNA Raw data section.
+06.07.
+Files are downloaded and renamed
+Counts
+[https://irbhr-my.sharepoint.com/:x:/r/personal/ivan_sabol_irb_hr/_layouts/15/Doc.aspx?sourcedoc=%7B4494175D-44A6-4AC3-B5D2-9B0C65129E99%7D&file=counts.xls&action=default&mobileredirect=true]
+miR_counts_matrix.txt
+
+
+Annotation
+[https://irbhr-my.sharepoint.com/:x:/r/personal/ivan_sabol_irb_hr/_layouts/15/Doc.aspx?sourcedoc=%7B730E1B28-8BA3-495E-AE86-9C60BC6F7C53%7D&file=annot.xlsx&action=default&mobileredirect=true]
+miR_sample_table.csv
+
+Files
+
+
+### Loading data
+
+The matrix contains only microRNA counts. For input the counts table was
+modified. The modification included deleting the second row which
+contains the information about the sample group and the column names
+were renamed to an unique id (eg. from Grce_17trimmed to RNA3T). Also, a
+0 was added for the first column to denote an column for rownames. The
+modified file is miR_counts_matrix.txt
+
+```{r mir loading data, message=FALSE}
+# count matrix
+mir_countdata <- read.csv("data/miR_counts_matrix.csv", row.names=1)
+
+# coldata
+mir_coldata <- read.csv("data/miR_sample_table.csv",
+                    row.names = 1,
+                    sep = ",",
+                    stringsAsFactors = FALSE) %>%
+  dplyr::select(names=ID, Region_tissue = "Tissue", everything()) %>%
+  # Creating Hist - cancer/control column 
+  dplyr::mutate(Hist = case_when(Tumor == "SCC" ~ "cancer",
+                                 Tumor == "normal" ~ "normal")) %>%
+  # Creating Tissue that corresponds to OP or O 
+  dplyr::mutate(Tissue = case_when(Region == "oropharyngeal" ~ "OP",
+                                   Region == "oral" ~ "O")) %>%
+  dplyr::mutate(HPV = case_when(HPV == 1 ~ "P",
+                                HPV == 0 ~ "N"))
+
+
+# Renaming colnames by samle names 
+colnames(mir_countdata) <- mir_coldata$names
+```
+
+**Excluding samples**\
+Here we exclude samples with sampleID KBD9 and KBD25 since they are
+outliers as per paper Božinović et al.
+```{r miR excluding samples}
+keep <- mir_coldata$names != "KBD9" & mir_coldata$names != "KBD25"
+mir_coldata <- mir_coldata [keep,]
+
+
+keep <- colnames(mir_countdata) != "KBD9" & colnames(mir_countdata) != "KBD25"
+mir_countdata <- mir_countdata [,keep]
+
+```
+
+**Creating a dds object** The aim of this experiment is to explore
+differentially expressed microRNA genes. From this data we can explore
+difference between cancer and normal, HPV pos and neg samples and
+different tissue samples. This notebook demonstrates differential
+expression analysis on the design Tissue + HPV.
+
+```{r mir dds object, message=FALSE}
+mir_dds <- DESeqDataSetFromMatrix(countData = mir_countdata, 
+                                       colData = mir_coldata, 
+                                       design = ~Hist + Tissue + HPV)
+  
+
+# filtering low count rows
+print("Before low count filtering")
+dim(mir_dds)
+keep <- rowSums(counts(mir_dds)) > 10
+mir_dds <- mir_dds[keep,]
+print("After low count filtering")
+dim(mir_dds)
+```
+
+### Exploratory analysis
+
+Variance transformation is a statistical method for multidimensional
+data so it becomes homoskedastic. This data can be analyzed through
+clustering and principal component analysis.\
+**rlog transformation**  
+Regularized logartihm (rlog) transformation
+behaves similarly to the log2 transformation. It is slower than the VST
+but recomended for small datasets (n\<30).
+```{r mir rlog transformation}
+mir_rld <- rlog(mir_dds)
+```
+
+**Sample distance** To asses overall similarity between samples we
+calculate sample distance using the R function dist to calculate the
+Euclidean distance.
+
+
+Triangle sample distance heatmap
+
+```{r mir sample distance heatmap-triangle}
+mir_annot_row <- as.data.frame(colData(mir_rld)[,c("Hist","Tissue", "HPV")])
+
+triangleHeatMap(assay(mir_rld),
+                color = "Reds",
+                annot_row = mir_annot_row,
+                triangle.diagonal = F)
+```
+
+```{r mir PCA plot}
+# selecting data for plotting pca
+mRNA_pcadata <- 
+  DESeq2::plotPCA(mir_rld, 
+                  intgroup = c("Hist", "HPV", "Tissue"),
+                  returnData = TRUE)
+# selecting variance
+percentVar <- round(100 * attr(mRNA_pcadata, "percentVar"))
+
+# plotting pca data
+ggplot(mRNA_pcadata, aes(x = PC1, y = PC2, color = HPV, shape = Hist)) +
+  geom_point(size =3) +
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+   theme(panel.grid = element_blank(), 
+         panel.background = element_rect(fill = "white"), 
+  panel.border = element_rect(fill = "transparent"))+
+  coord_fixed() +
+  ggtitle("PCA with rlog data")+
+  scale_color_manual(values = c("firebrick1","forestgreen","blue1"))+
+  geom_text_repel(aes(label = colData(mir_rld)$names), size =3)
+
+```
+
+### Differential expression analysis
+
+The call to DESeq function preforms the estimation of size factors,
+estimation of dispersion values and fits a generalized linear model.
+
+```{r mir Running the DESeq function, cache=FALSE, message=FALSE}
+mir_dds <- DESeq(mir_dds, betaPrior = T)
+```
+
+Differential expression on cancer control group
+```{r mir DE cancer-control}
+mir_res <- results(mir_dds, contrast = c("Hist","cancer","normal"))
+
+mir_res
+```
+
+Some summary statistic
+```{r mir summary stat}
+summary(mir_res, alpha=0.05)
+```
+
+Filtering BH adjusted pvalue results
+```{r mir significantly DE mir}
+mir_DE <- filter(as.data.frame(mir_res), padj < 0.05)
+
+summary(mir_DE)
+hist(mir_DE$log2FoldChange, border="white", col="darkgreen")
+hist(log(mir_DE$baseMean), border="white", col="darkblue")
+```
+
+**HPV effect on cancer**\
+In the next chunk explores the effect of HPV on cancer. To be more
+precise, it explores which genes are DE in HPV in cancer. Firstly
+compare HPV - and controls to get a list of genes that re DE in cancer
+samples. Secondly, compare HPV + and HPV - samples and exclude genes
+from the previous comparison.
+```{r mir HPV effect on cancer, message=FALSE}
+# making another dds object with different design
+mir_dds_HPV <- mir_dds
+
+# New column in colData for design
+colData(mir_dds_HPV)$HistHPV <-
+  as.factor(paste0(colData(mir_dds_HPV)$Hist,colData(mir_dds_HPV)$HPV))
+
+# setting the HistHPV des
+design(mir_dds_HPV) =~ HistHPV
+
+# Running the DESeq function
+mir_dds_HPV <- DESeq(mir_dds_HPV, betaPrior = T)
+
+# Contrasting between negative HPV and controls
+res.cN.nN <- 
+  results(mir_dds_HPV, contrast=c("HistHPV","cancerN","normalN"), tidy = T)
+# Contrasting between HPV negative and positive
+res.cP.cN <- 
+  results(mir_dds_HPV, contrast=c("HistHPV","cancerP","cancerN"), tidy = T)
+
+# selecting significant results
+res.cP.cN <- dplyr::filter(res.cP.cN, padj < 0.1)
+res.cN.nN <- dplyr::filter(res.cN.nN, padj < 0.1)
+
+# excluding the cancer infulence
+mir_res_HPV <- res.cP.cN[!is.element(res.cP.cN$row, res.cN.nN$row),]
+
+mir_res_HPV
+```
+
+**Volcano plot**
+
+```{r mir volcano plot}
+volcano <- mir_res
+LFC.TRESH <- 1
+PVAL.TRESH <- 0.05
+
+# Building volcano plot
+volcano <- as.data.frame(mir_res) %>% 
+  dplyr::filter(!is.na(padj)) %>% #filtering NA's
+  dplyr::mutate(diffexpressed = dplyr::case_when(
+    padj < PVAL.TRESH & log2FoldChange > LFC.TRESH ~ "UP",
+    padj < PVAL.TRESH & log2FoldChange < -LFC.TRESH ~ "DOWN",
+    TRUE ~ "NO")) 
+
+# Volcano colors
+volcano_cols <- c("red", "gray60", "green")
+
+# p value tresh for delabeling
+p_volcano_tresh <- arrange(volcano,padj)[12, "padj"]
+volcano <- volcano %>%
+  mutate(delabel = ifelse(padj <= p_volcano_tresh,
+                          rownames(volcano),
+                          NA))
+  
+
+ggplot(data=as.data.frame(volcano), 
+       aes(x=log2FoldChange, 
+           y=-log10(padj), 
+           col=diffexpressed))+
+  geom_point()+
+  theme_minimal()+
+  scale_color_manual(values = volcano_cols)
+
+ggplot(data=as.data.frame(volcano), 
+       aes(x=log2FoldChange, 
+           y=-log10(padj), 
+           col=diffexpressed))+
+  geom_point()+
+  theme_minimal()+
+  scale_color_manual(values = volcano_cols)+
+  geom_text_repel(aes(label = delabel), show.legend = FALSE,
+                  size =3, max.overlaps = 10)
+
+```
+
+**Counts plot**\
+Visualizing counts for genes
+
+```{r mir counts plot overexpressed in cancer}
+# Using the list of genes that are labeled in volcano plot
+genes <- rownames(filter(volcano, !is.na(delabel)))
+
+# Building an object for multiple counts plot
+op <- par(mfrow = c(3,4),
+          oma = c(2,2,0,0) + 1,
+          mar = c(0,0,1,1) + 1.2)
+# Plotting
+for(gene in genes){
+  plotCounts(mir_dds, gene = gene, intgroup = c("Hist"),
+             returnData = F, pch = 19)
+}
+par(op)
+```
+
+# DNAm
+
+### Raw data
+
+Raw DNAm data was previously published in Gasperov paper:
+<https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7554960/> Raw data was
+preprocessed with Champ tool - normalization and batch effect removal.
+For simplicity preprocesed Rdata was loaded in this notebook. Data was
+provided from Sabol.
+
+### Loading data
+
+For this analysis only cancer samples that have available microRNA and
+mRNA data will be considered. Since there is no methylation data for
+control samples of which there are microRNA and mRNA data, other control
+samples will be used for all analysis.
+
+Methylation data is saved in an object from the RnBeads class.
+
+```{r DNAm loading data}
+load("data/rnb.set_Combat.RData")
+
+# Renaming the rnb set
+rnb_set <- rnb.set_Combat
+rm(rnb.set_Combat)
+```
+
+This methylation dataset contains data about lesions which was not
+considered in this research. Lesion samples are removed here.
+Furthermore, additional phenotype data is added here. The xlsx table was
+downloaded from cloud and is called additional_columns_impute.xlsx and
+renamed to DNAm_additional_pheno.xlsx
+[https://irbhr-my.sharepoint.com/:x:/r/personal/ivan_sabol_irb_hr/_layouts/15/Doc.aspx?sourcedoc=%7B78038B29-1ABE-4F97-861F-4054B3A80D37%7D&file=additional_columns_impute.xlsx&action=default&mobileredirect=true]
+
+```{r DNAm removing samples}
+# Removing lesions that are not included in the analysis
+rnb_set <- 
+  remove.samples(rnb_set, 
+                 samplelist = (pheno(rnb_set)$Sample_group == "Lesion"))
+
+dnam_pheno <-
+  read_xlsx("data/DNAm_additional_pheno.xlsx", range = cell_cols("A:M"))
+
+# Filtering out Lesions and renaming HPV values to P and N
+dnam_pheno <-
+  dnam_pheno %>%
+  filter(Sample_group != "Lesion") %>%
+  mutate(HPV = ifelse(HPV == 1 , "P", "N")) 
+
+# Adding HPV and other phenotype data
+rnb_set <- addPheno(rnb_set, dnam_pheno$HPV, "HPV")
+rnb_set <- addPheno(rnb_set, dnam_pheno$Gender, "Gender")
+rnb_set <- addPheno(rnb_set, dnam_pheno$AgeGroup, "Age_group")
+```
+
+### Exploratory analysis
+
+For DNAm data there are multiple regions that could be taken into
+consideration. Some of the standards are CpG sites that evaluate
+individual CpG's, promoters (-2000, 500 from TSS), gene (gene body) and
+CpG islands (CGI are ranges with higher frequency of CpG's that are
+previously annotated and are known).
+
+**PCA plot**  
+PCA plots could be generated over multiple regions.
+Individual CpG is computationaly expensive to calculate so only PCA on
+CGI is preformed
+
+```{r DNAm PCA plot on CpG islands, message=FALSE}
+# Preforming dimension reduction on CpG islands
+dred_islands <- rnb.execute.dreduction(rnb_set, target ="cpgislands")
+
+# Building dnam_pca_data table for plotting
+dnam_pca_data <- as.data.frame(dred_islands$pca$x[,c("PC1","PC2")])
+
+# Additional annotation data
+dnam_pca_data <- 
+  cbind(dnam_pca_data,
+        dplyr::select(as.data.frame(pheno(rnb_set)), 
+                      Sample_group, HPV, Gender, Age_group))
+
+
+ggplot(dnam_pca_data,aes(x=PC1,y=PC2, color=Sample_group, shape = HPV))+
+  geom_point(data = dnam_pca_data, size=4)+
+  ggtitle("PCA plot - CpG islands")+
+  theme(panel.grid = element_blank(), 
+        panel.background = element_rect(fill = "white"),
+        panel.border = element_rect(fill = "transparent"))+
+  geom_text_repel(aes(label = rownames(dnam_pca_data)), size =3)
+
+
+```
+
+**Sample distance**  
+To asses overall similarity between samples we
+calculate sample distance using the R function dist to calculate the
+Euclidean distance.
+
+Triangle sample distance heatmap
+
+```{r DNAm sample distance heatmap-triangle, message=FALSE}
+# dataframe with annotation rows for triangle heatmap
+dnam_annot_row <- dplyr::select(as.data.frame(pheno(rnb_set)), 
+                                Sample_group, HPV, Gender, Age_group)
+
+# Annotation dfs need to have samples as rownames
+rownames(dnam_annot_row) <- pheno(rnb_set)$Sample_ID
+
+# Call the local function
+# triangleHeatMap(meth(rnb_set),
+#                 color = "Greens",
+#                 annot_row = dnam_annot_row,
+#                 triangle.diagonal = F)
+```
+
+### Differential methylation
+
+Differential methylation can be calculated for specific sites or genomic
+regions. Since promoter and gene (gene body) regions are arbitrary
+picked ranges, CpG islands regions are used for differential methylation
+analysis. To see meaning of each column look at RnBeads vignette. For
+most of the analysis mean.mean.diff was taken into consideration because
+the value is similar as fold change in sequencing data.
+```{r DNAm differential methylation on cpg islands, message=FALSE}
+diff_meth <- rnb.execute.computeDiffMeth(rnb_set,
+                                         pheno.cols = "Sample_group",
+                                         region.types = "cpgislands")
+
+
+# Diff methylation table for CpG islands
+dnam_res <- get.table(diff_meth,
+                      get.comparisons(diff_meth)[1],
+                      "cpgislands",
+                      return.data.frame =T)
+
+# Diff methylation table for CpG sites, used for volcano plot
+dnam_res_sites <- get.table(diff_meth,
+                      get.comparisons(diff_meth)[1],
+                      "sites",
+                      return.data.frame =T)
+
+
+head(dnam_res)
+```
+
+Summary statistic of significant cpg island differential methylation.
+```{r DNAm summary on DM}
+summary(filter(dnam_res, comb.p.adj.fdr < 0.05))
+
+```
+
+Global DNA hypomethylation was observed in most cancer tissues and
+hypermethylation of certain regions. Since hypomethylation happens at
+the level of the genome it is hard to pinpoint if there are direct
+oncogenic effect or is it a secondary result of malignancy. However ,
+DNA hypermethylation on CpG rich locations named CpG islands which may
+affect gene transcirption or chromatin structure. Here we explore
+influecne of differential methylation of cpg islands in promoter
+regions.
+
+Making GRanges for cpg island data then finding overlaps within hg19
+promoter regions. Promoter regions are defined as -2000 and +500 bases
+from the transcription start site (TSS).
+```{r DNAm res cgi with gene information}
+# Combining dnam res data with granges data
+dnam_res_cgi <- 
+  data.frame(dplyr::select(as.data.frame(annotation(rnb_set, "cpgislands")),
+                    Chromosome,Start,End,Strand),
+             dplyr::select(as.data.frame(dnam_res),
+                    log.quot="mean.mean.quot.log2",
+                    pvalue="comb.p.val",
+                    padj="comb.p.adj.fdr",
+                    num.sites))
+
+# Making Granges object
+dnam_res_cgi <-
+  makeGRangesFromDataFrame(dnam_res_cgi,keep.extra.columns=TRUE)
+
+# Getting promoter ranges with gene names
+promoter_ranges <- unlist(rnb.get.annotation(type="promoters", assembly="hg19"),
+                          use.names = F) %>%
+  plyranges::select(symbol)
+
+# Transfering ensembl genes to a column so that it does not lose in join overlaps
+promoter_ranges$ensembl <- names(promoter_ranges)
+
+
+# Overlaping cgi with promoter of genes
+dnam_res_cgi <-
+  join_overlap_left(dnam_res_cgi, promoter_ranges)
+```
+
+**Volcano plot**  
+
+Volcano plot on differentially methylated cpg islands. Cancer cells manifest  
+global hypomethylation of cpg sites, although this effect is visible in our data  
+we also observe a high occurence fo hypermethylation on cpg islands. 
+```{r DNAm volcano on cpg islands}
+LFC.TRESH <- 0
+PVAL.TRESH <- 0.05
+volcano_cols <- c("green","red",  "gray60")
+
+# volcano data frame
+volcano <- data.frame(values(dnam_res_cgi)) %>%
+  dplyr::mutate(diffexpressed = dplyr::case_when(
+    padj < PVAL.TRESH & log.quot > LFC.TRESH ~ "Hypermethylated",
+    padj < PVAL.TRESH & log.quot < -LFC.TRESH ~ "Hypomethylated",
+    TRUE ~ "Not significant"))
+
+ggplot(data=as.data.frame(volcano), 
+       aes(x=log.quot, 
+           y=-log10(padj), 
+           col=diffexpressed))+
+  geom_point()+
+  theme_minimal()+
+  scale_color_manual(values = volcano_cols)
+
+table(volcano$diffexpressed)
+```
+
+Since there are too many points on the volcano plot for differential
+methylation on cpg sites a histogram is used to visualize that most of
+cpg sites are hypomethylated. CpGs with padj \< 0.05 are used for
+construction of histogram
+```{r DNAm histogram plot on cpgs}
+# Volcano data frame
+dnam_res_sites <- 
+  dplyr::select(dnam_res_sites, 
+         log.quot="mean.quot.log2",
+         pvalue="diffmeth.p.val",
+         padj="diffmeth.p.adj.fdr") 
+
+hist(dplyr::filter(dnam_res_sites, padj < 0.05)$log.quot, 
+     main="Histogram of CpG sites with padj < 0.05",
+     xlab="log.quot",
+     col="darkgreen",
+     border="white")
+
+```
+
+
+**GSEA analysis**  
+Preforming gsea analysis on genes that have differentially methylated cpg islands in promoters. Number of genes are around 5700. KEGG pathways like Pathways in cancer, Breast cancer, Rap1 signaling pathway
+```{r DNAm gsea on cgi in promoters}
+# Using only part of sources
+GSEA_SOURCES <- c("GO:BP","CORUM","KEGG","REAC","WP","MIRNA")
+
+gost_DNAm <-
+  gost(filter(dnam_res_cgi, padj < 0.05 & !is.na(ensembl))$ensembl,
+       organism= "hsapiens",
+       exclude_iea=TRUE,
+       domain_scope="annotated",
+       ordered_query=F,
+       sources=GSEA_SOURCES)
+
+# Change query name
+gost_DNAm$result$query <- "CGI"
+
+#Plot and table of significant results
+gostplot(gost_DNAm ,capped = F, interactive = T)
+
+```
+
+```{r exporting function, eval=FALSE, echo=FALSE}
+write_xlsx(mRNA_res_HPV, path = paste0("outputs/tables/",format(Sys.time(), "%Y%m%d_%H%M_"),"mRNA_res_HPV.xlsx"))
+
+write.csv(counts(mRNA_dds["ENSG00000147889"], normalize=FALSE), "outputs/p16_counts.csv")
+
+```
+Saving objects for further analysis as RDS
+```{r RDS}
+#mRNA
+saveRDS(mRNA_dds,"outputs/RDS/mRNA_dds.rds")
+saveRDS(mRNA_dds_HPV,"outputs/RDS/mRNA_dds_HPV.rds")
+saveRDS(mRNA_res,"outputs/RDS/mRNA_res.rds")
+saveRDS(mRNA_res_HPV,"outputs/RDS/mRNA_res_HPV.rds")
+
+#mir
+saveRDS(mir_dds,"outputs/RDS/mir_dds.rds")
+saveRDS(mir_dds_HPV,"outputs/RDS/mir_dds_HPV.rds")
+saveRDS(mir_res,"outputs/RDS/mir_res.rds")
+saveRDS(mir_res_HPV,"outputs/RDS/mir_res_HPV.rds")
+
+#DNAm
+saveRDS(dnam_res_cgi, "outputs/RDS/dnam_res_cgi.rds")
+saveRDS(rnb_set,"outputs/RDS/rnb_set.rds")
+```
+
+
+
+# Session Info
+```{r sessionInfo}
+sessionInfo()
+```

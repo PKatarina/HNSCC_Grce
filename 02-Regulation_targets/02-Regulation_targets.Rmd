@@ -1,0 +1,281 @@
+---
+title: "02 Regulation targets"
+output: html_notebook
+---
+
+# Description
+Objects that are used in this notebook are generated with 01-Exploratory_analysis_and_differential_expression nb and loaded with RDS. Here we connect mRNA - mir and mRNA - DNAm data. We are exploring do miR and DNAm regulate the the expression of mRNA to do so we need to identify the targets of those kinds of regulations.
+For miR targets we query the database of mir-gene inrerctions mirTarBase that have experimentally supported evidence. DNAm targets are determined as differentially methylated cpg islands in promoter regions of genes. For this analysiso only significant results with adjsuted p-values < 0.05 are considered.
+
+# Libraries
+```{r Libraries, message=FALSE}
+library(multiMiR)
+library(gprofiler2)
+library(knitr)
+library(dplyr)
+```
+
+# Loading data
+```{r}
+# Destination of outputs from 01-Exploratory_analysis_and_diff_expression 
+dir_dest <- "/home/katarina/MyProjects/HNSCC/01-Exploratory_analysis_and_differential_expression/outputs/RDS"
+
+
+# mRNA
+mRNA_dds <- readRDS(file.path(dir_dest, "mRNA_dds.rds"))
+mRNA_dds_HPV <- readRDS(file.path(dir_dest, "mRNA_dds_HPV.rds"))
+mRNA_res <- readRDS(file.path(dir_dest, "mRNA_res.rds"))
+mRNA_res_HPV <- readRDS(file.path(dir_dest, "mRNA_res_HPV.rds"))
+
+
+# mir
+mir_dds <- readRDS(file.path(dir_dest, "mir_dds.rds"))
+mir_dds_HPV <- readRDS(file.path(dir_dest, "mir_dds_HPV.rds"))
+mir_res <- readRDS(file.path(dir_dest, "mir_res.rds"))
+mir_res_HPV <- readRDS(file.path(dir_dest, "mir_res_HPV.rds"))
+
+# DNAm
+rnb_set <- readRDS(file.path(dir_dest, "rnb_set.rds"))
+dnam_res_cgi <- readRDS(file.path(dir_dest, "dnam_res_cgi.rds"))
+```
+Check if colnames mRNA dds is not null 
+```{r}
+if(colnames(mRNA_dds)%>%is.null()){
+  colnames(mRNA_dds) <- colData(mRNA_dds)$GRCE.NAME
+}
+```
+
+
+# miR - mRNA
+##Interactions
+
+Interaction tables are obtained by querying with multimir package. Setting up the query.
+```{r}
+# Significant mir's
+mir_query <- rownames(dplyr::filter(as.data.frame(mir_res), padj < 0.05))
+
+# Significant mRNA
+mRNA_query <- rownames(dplyr::filter(as.data.frame(mRNA_res), padj < 0.05))
+
+print(paste("Length of mir query: ", length(mir_query),
+             "   Length of mRNA query: ", length(mRNA_query)))
+```
+Querying the database
+
+```{r}
+database <- "mirtarbase"
+
+# Querying
+multi_db <- get_multimir(mirna = mir_query,
+                         target = mRNA_query,
+                         table = database)
+
+# Selecting results
+targ_mir_mRNA <- 
+  multiMiR::select(multi_db,
+                   keytype = "type",
+                   keys = "validated",
+                   columns = c("mature_mirna_id", 
+                               "target_ensembl",
+                               "target_symbol"))
+
+# Removing duplicates and removing type column (redundant)
+targ_mir_mRNA <- unique(dplyr::select(targ_mir_mRNA, -type))
+
+rm(multi_db)
+
+head(targ_mir_mRNA)
+
+saveRDS(targ_mir_mRNA, "outputs/RDS/targ_mir_mRNA.rds")
+
+```
+
+```{r}
+print(c(paste("Number of mRNA mir interactions: ", dim(targ_mir_mRNA)[1]),
+        paste("Number of mirs in interactions: ",
+              length(unique(targ_mir_mRNA$mature_mirna_id))),
+        paste("Number of target genes :", 
+              length(unique(targ_mir_mRNA$target_ensembl)))))
+```
+```{r}
+# Frequency table of mir's in the interaction table
+table(targ_mir_mRNA$mature_mirna_id) %>%
+  as.data.frame() %>%
+  arrange(desc(Freq)) %>%
+  head()
+```
+
+```{r}
+# Frequency of genes in interaction table
+head(table(targ_mir_mRNA$target_symbol) %>%
+  as.data.frame() %>%
+  arrange(desc(Freq)))
+```
+
+GSEA analysis on genes under mir regulation. Around half of DE genes are targets for mir regulation. Terms that appear in GSEA analysis are involved in regulation of cellular processes, regulation of transcription, there is a KEGG term proteoglyncans in cancer, and several REACTOME terms involved in cell cycle regulation.
+```{r}
+# Using only part of sources
+GSEA_SOURCES <- c("GO:BP","CORUM","KEGG","REAC","WP","MIRNA", "TF")
+
+# Calling gost function
+gost_res <- 
+    gost(targ_mir_mRNA$target_ensembl,
+       organism= "hsapiens",
+       exclude_iea=TRUE,
+       domain_scope="annotated",
+       ordered_query=F,
+       sources=GSEA_SOURCES)
+
+# Change query name
+gost_res$result$query <- "Mir targets on whole genome background"
+
+gostplot(gost_res, capped = FALSE)
+```
+
+## HPV Effect
+Querying the database for mirs and mRNA that are DE in the HPV group.
+
+Building queries
+```{r}
+# building mir query
+mir_HPV_query <- filter(as.data.frame(mir_res_HPV), pvalue < 0.05)$row
+
+# building mRNA query
+mRNA_HPV_query <- filter(as.data.frame(mRNA_res_HPV), pvalue < 0.05)$row
+
+print(paste("Length of mir query: ", length(mir_HPV_query),
+             "   Length of mRNA query: ", length(mRNA_HPV_query)))
+```
+
+```{r}
+# querying all databases that contain predicted interactions
+multi_db <- get_multimir(mirna = mir_HPV_query,
+                         target = mRNA_HPV_query,
+                         table = "predicted")
+
+# Selecting columns
+targ_mir_mRNA_HPV <- 
+  multiMiR::select(multi_db,
+                   keytype = "type",
+                   keys = "predicted",
+                   columns = c("mature_mirna_id", 
+                               "target_ensembl",
+                               "target_symbol"))
+
+# Selecting only unique interaction, dropping type
+targ_mir_mRNA_HPV <-unique(dplyr::select(targ_mir_mRNA_HPV, -type))
+
+targ_mir_mRNA_HPV
+```
+```{r}
+# Frequency table of mir's in the interaction table
+table(targ_mir_mRNA_HPV$mature_mirna_id) %>%
+  as.data.frame()%>%
+  arrange(desc(Freq))
+
+# Frequency of genes in interaction table
+table(targ_mir_mRNA_HPV$target_symbol) %>%
+  as.data.frame()%>%
+  arrange(desc(Freq))
+```
+
+```{r}
+# Using only part of sources
+GSEA_SOURCES <- c("GO:BP","CORUM","KEGG","REAC","WP","MIRNA", "TF")
+
+# Calling gost function
+gost_res <- 
+    gost(targ_mir_mRNA_HPV$target_ensembl,
+       organism= "hsapiens",
+       exclude_iea=TRUE,
+       domain_scope="annotated",
+       ordered_query=F,
+       sources=GSEA_SOURCES)
+
+# Change query name
+gost_res$result$query <- "Mir HPV targets on whole genome background"
+
+gostplot(gost_res, capped = FALSE)
+```
+## Correlation
+
+Testing count correlation for mir and mRNA for interaction pairs. Input are normalized count data for the 13 intersecting samples. This table will be used for picking the best mir to attach in the integrative table.
+
+```{r, eval=FALSE}
+# Data frame with correlations
+cor_mir <- 
+  dplyr::select(targ_mir_mRNA,
+                mir = mature_mirna_id,
+                symbol = target_symbol,
+                gene = target_ensembl)
+
+
+# Looping through all the pairs.
+for(i in 1:dim(cor_mir)[1]){
+  if(i%%100 ==0){
+    message(paste("Processing pair number: ",i,
+                  " mir: ",cor_mir$mir[i],
+                  " gene ",  cor_mir$symbol[i]))
+  }
+  c <- 
+    cor.test(x=as.numeric(
+      counts(mir_dds, normalize=TRUE)[cor_mir$mir[i],colnames(mRNA_dds)]),
+      y=as.numeric(
+        counts(mRNA_dds, normalize=TRUE)[cor_mir$gene[i],]),
+      method="spearman",
+      exact = FALSE)
+  cor_mir$r[i] <- c$estimate
+  cor_mir$pvalue[i] <- c$p.value
+}
+
+# Saving cor_mir object into RDS because of long computing time
+saveRDS(cor_mir, "outputs/RDS/cor_mir.rds")
+```
+
+```{r}
+# best correlations
+cor_mir <- readRDS("outputs/RDS/cor_mir.rds")
+head(dplyr::arrange(cor_mir,r))
+tail(dplyr::arrange(cor_mir,r))
+```
+
+# DNAm - mRNA
+
+Creating an DNA methylation and mRNA table. As input for DNAm a granges object with cpg island intervals and a column that contains gene names whose promoter region overlaps that cpg island.
+
+```{r}
+mRNA_res_sub <- dplyr::filter(as.data.frame(mRNA_res), padj < 0.05)
+
+targ_dnam_mRNA <- 
+  plyranges::filter(dnam_res_cgi, ensembl %in% rownames(mRNA_res_sub))
+
+targ_dnam_mRNA <- saveRDS(targ_dnam_mRNA, "outputs/RDS/targ_dnam_mRNA.rds")
+```
+Some of the cpg (19) islands overlap more than one gene promoter, and 72 genes have 2 (exactly) cpg islands in their promoters.
+
+GSEA GSEA analysis on genes that are under methylation regulation. There many terms from TF source which is expected. Since the differentially methylated cpg islands that were selected are in promoter regions of those genes. Also in from the reactom database there are many terms involved in the regulation of the cell cycle.
+
+```{r}
+# Using only part of sources
+GSEA_SOURCES <- c("GO:BP","CORUM","KEGG","REAC","WP","MIRNA", "TF")
+
+# Calling gost function
+gost_res <- 
+    gost(targ_dnam_mRNA$ensembl,
+       organism= "hsapiens",
+       exclude_iea=TRUE,
+       domain_scope="annotated",
+       ordered_query=F,
+       sources=GSEA_SOURCES)
+
+# Change query name
+gost_res$result$query <- "DE genes with DM promoters"
+
+gostplot(gost_res, capped = FALSE)
+```
+
+
+# Session Info
+```{r Session info}
+sessionInfo()
+```
