@@ -40,7 +40,7 @@ integrateOmicsData <- function(mrna_res_obj, mir_res_obj, dnam_res_obj, mir_targ
   # Transformin dnam data to df and renaming columns
   dnam_res_obj = unique(dnam_res_obj) %>%
     as.data.frame() %>%
-    dplyr::mutate(dnam_condensed_ranges = str_c(seqnames,":",start,"-",end, sep = "")) %>%
+    dplyr::mutate(dnam_condensed_ranges = stringr::str_c(seqnames,":",start,"-",end, sep = "")) %>%
     dplyr::select(gene = "ensembl",
                   dnam_quot = "log.quot",
                   dnam_pval = "pvalue",
@@ -119,17 +119,76 @@ plot_pheatmap <- function(dat, colVec, colBreaks, annotRows, gaps, prefix){
     filename=f)
 }
 
-kmeansHeatmap <- function(tb, ann_tb = FALSE, clusters, nstart, GSEA=FALSE){
-  # @ description
+calcGaps <- function(vec){
+  # @description: returns a vector of gaps separating clusters for plotting 
+  # cluster heatmap
   
+  # specify white space between clusters
+  x <- table(as.numeric(vec))
+  gps <- numeric(length(x))
+  for(i in 1:length(x)){
+    gps[i:length(x)] <- gps[i:length(x)]+x[i]
+  }
+  return(gps)
+}
+
+plotKmeansPheatmap <- function(tb, additional_annotation = NULL, custom_cluster_names = NULL, file=NA ){
+  
+  # Number of clusters
+  c <- length(unique(tb$kmeans))
+  
+  # Colors
+  heat_colors <-colorRampPalette(brewer.pal(n=9, name="RdBu"))(100)
+  clusters_annot_colors <- brewer.pal(12, "Paired")[1:c]
+  # Named vectors for clusters
+  if(is.null(custom_cluster_names)){
+    names(clusters_annot_colors) <- 1:c
+  }
+
+  
+  # For continuous colors (passed in breaks in pheatmap)
+  rg <- max(abs(select(tb, -kmeans)))
+  
+  # Specify white space between clusters
+  gps <- calcGaps(tb$kmeans)
+  
+  # Annotation row beside the heatmap
+  annotRows <- data.frame(row.names = rownames(tb),
+                          Cluster = as.numeric(tb$kmeans)) %>%
+    dplyr::arrange(Cluster) %>%
+    dplyr::mutate(Cluster = as.factor(Cluster))
+  
+  # Saving colors scheme to list (has to have the SAME name as in annotRows)
+  annotColors=list(Cluster=clusters_annot_colors)
+
+  # Additional annotations
+  if(!is.null(additional_annotation)){pass}
+  
+
+
+  # Main plotting function
+  pheatmap(
+    mat=select(tb, -kmeans),
+    color=heat_colors,
+    breaks = seq(-rg, rg, length.out = 100),
+    annotation_row=annotRows,
+    annotation_colors=annotColors,
+    show_rownames=F,
+    fontsize_row=5,
+    gaps_row=gps,
+    cluster_rows=F, 
+    cluster_cols=F,
+    border_color='white',    
+    filename=file)
+
+}
+
+kmeansHeatmap <- function(tb, ann_tb=FALSE, clusters, nstart, GSEA=FALSE){
+  # @ description
   
   timestamp <- Sys.time()
   timestamp <- format(timestamp, "%Y%m%d_%H%M_")
-  heatmap.col_vec2 <- brewer.pal(n=9, name="RdBu")
-  
-  # Coloring try 2
-  heatmap.col_vec2 <-colorRampPalette(brewer.pal(n=9, name="RdBu"))(100)
-  
+
   
   for(c in clusters){
     print(paste0("Processing kmeans with ", c, " clusters."))
@@ -142,50 +201,15 @@ kmeansHeatmap <- function(tb, ann_tb = FALSE, clusters, nstart, GSEA=FALSE){
       dplyr::mutate(kmeans= as.numeric(k$cluster)) %>%
       dplyr::arrange(kmeans)
     
-    # specify white space between clusters
-    x <- table(as.numeric(tb$kmeans))
-    gps <- numeric(length(x))
-    for(i in 1:length(x)){
-      gps[i:length(x)] <- gps[i:length(x)]+x[i]
-    }
+    # Timestamped filename
+    filename = 
+      paste0("clustering/",timestamp,"_", c, "clusters","_",nstart,"nstart")
     
+    # Passing kmeans results to the plotting function
+    plotKmeansPheatmap(tb, file = paste0(filename,".png"))
     
-    rg <- max(abs(select(tb, -kmeans)))
-    
-    # Annotation row beside the heatmap
-    annotRows <- data.frame(Cluster = as.numeric(tb$kmeans)) %>%
-      dplyr::arrange(Cluster) %>%
-      dplyr::mutate(Cluster = as.factor(as.character(Cluster)))
-    #print(str(annotRows))
-    
-    annotRows[is.na(annotRows)]<- 0
-    rownames(annotRows) <- rownames(tb)
-
-    
-    clClus <- brewer.pal(12, "Paired")
-    # assigning schemes to columns in annotRows 
-    clColors <- clClus[1:c]
-    names(clColors) <- 1:c
-    annotColors=list(Cluster=clColors)
-        #Cpg_num = brewer.pal(8,"Greys"))
-
-
-
-    pheatmap(
-      mat=select(tb, -kmeans),
-      color=heatmap.col_vec2,
-      breaks = seq(-rg, rg, length.out = 100),
-      annotation_row=annotRows,
-      annotation_colors=annotColors,
-      show_rownames=F,
-      fontsize_row=5,
-      gaps_row=gps,
-      cluster_rows=F, 
-      cluster_cols=F,
-      border_color='white',    
-      filename=paste0("clustering/",timestamp,"_", c,
-                      "clusters","_",nstart,"nstart",".png"))
-
+    # Saving tables for later use
+    saveRDS(tb, file = paste0(filename,".rds"))
   
   }
   

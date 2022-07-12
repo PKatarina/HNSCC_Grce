@@ -169,7 +169,9 @@ hist(k_tb$dnam_quot)
 #   as.data.frame()
 
 
-k_tb$dnam_quot <- scale(k_tb$dnam_quot)
+#k_tb$dnam_quot <- scale(k_tb$dnam_quot)
+# Doubling values so that the colors are more intense
+k_tb$dnam_quot <- k_tb$dnam_quot*2
 
 hist(k_tb$dnam_quot)
 
@@ -179,9 +181,15 @@ k_tb[is.na(k_tb)] <- 0
 
 
 ```{r}
-kmeansHeatmap(k_tb, clusters=8:12, nstart =50)
+kmeansHeatmap(k_tb, clusters= 10:14, nstart = 60)
 ```
 
+Testing the plotting function
+```{r}
+kmeans_tb <- readRDS("clustering/20220712_1331__12clusters_60nstart.rds")
+
+plotKmeansPheatmap(kmeans_tb)
+```
 
 
 # Session Info
