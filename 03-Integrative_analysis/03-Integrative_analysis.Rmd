@@ -20,6 +20,7 @@ library(DESeq2)
 library(tibble)
 library(kohonen)
 library(rprojroot)
+library(ggplot2)
 
 
 
@@ -94,7 +95,8 @@ query_ls <-
        rest = filter(simple_tb, mir == 0 & dnam == 0 )$genes)
 
 # Sources
-GSEA_SOURCES <- c("GO:BP","CORUM","KEGG","REAC","WP","MIRNA", "TF")
+#GSEA_SOURCES <- c("GO:BP","CORUM","KEGG","REAC","WP","MIRNA", "TF")
+GSEA_SOURCES <- c("GO:BP","KEGG","REAC", "MIRNA", "TF")
 
 gost <-
   gost(query = query_ls,
@@ -107,6 +109,52 @@ gost <-
 # Plot and table of significant results
 gostplot(gost, capped = T, interactive = T)
 ```
+
+```{r, eval=FALSE}
+writexl::write_xlsx(gost$result, "outputs/GSEA_Venn.xlsx")
+```
+
+## GSEA bars
+```{r}
+gsea_bar_cols <- c("GO:BP" = "#ffae2f",
+                   "KEGG" = "#de4478",
+                   "MIRNA" = "#4fbbac",
+                   "REAC" = "#3165ca",
+                   "TF"  = "#5474a5")
+# 
+# gsea_bar_data <- data.frame(dplyr::filter(gost$result, query=="dnam") %>%
+#                               dplyr::select(source))
+
+for(q in names(query_ls)){  
+  gsea_bar_data <- data.frame(dplyr::filter(gost$result, query==q) %>%
+                                dplyr::select(source) %>%
+                                table())
+  
+  ggplot(data = gsea_bar_data, aes(x = source, y = Freq, fill = source))+
+    geom_bar(width=0.6, stat = "identity") + 
+    theme_bw()+
+    theme(panel.grid = element_blank(),
+          text = element_text(size = 12),
+          legend.position = "none") + 
+    scale_fill_manual(values = gsea_bar_cols)+
+    ylim(0,472)+
+    geom_text(aes(label = Freq), vjust = -0.3)+
+    ylab("Number of terms")+
+    xlab("")
+  
+    ggsave(filename = paste("outputs/Venn_gsea_bars_", q, ".png", sep = ""),
+          width = 1000,
+          height = 700,
+          units = "px")
+  
+}
+  
+filter(gost$result, source == "TF") %>%
+  mutate(tf_modf = str_split(term_name, pattern = ";", simplify = TRUE)[,1]) %>%
+  pull(tf_modf) %>% unique() %>% length()
+
+```
+
 
 # Regulation table - integrated
 Building a complete and comprehensive table with results of DE and DM of the transcriptomic (mRNA), small-RNA transcriptomic (mir) and DNA methylation (CpG islands) to have all significant data in one data frame. The comprehensive table will contain all mir mRNA and dnam mRNA pairs. ! add colnames!
@@ -144,7 +192,7 @@ reg_df <-
   # Filtering out cgi that are not the best
   dplyr::filter(is.na(dnam_condensed_ranges) |
                   dnam_condensed_ranges == best_cgi) %>%
-  # Dropping uneeded columns. This info is already in mir and dnam ranges
+  # Dropping uneeded columns. This info is already in mggsaveir and dnam ranges
   dplyr::select(-best_cor, -best_cgi) %>%
   ungroup()
 
@@ -156,39 +204,74 @@ Using two unsupervised clustering methods SOM and kmeans to explore clusters of 
 ## **kmeans**
 K means clusters mRNA genes into k number of clusters in which each mRNA belongs to the cluster with the nearest mean (or cluster centroid). For more details look at the lecture materials from pmf machine learning.
 ```{r}
+
+#k_tb_old <- readxl::read_xlsx("data/kmeans_integrated_per_gene_df.xlsx")
 # Prepping kmeans table
+# k_tb <- data.frame(row.names = k_tb_old$gene,
+#                    dplyr::select(k_tb_old,
+#                                  gene_FC,
+#                                  mir_FC,
+#                                  dnam_quot = "dnam_FC"))
+
 k_tb <- data.frame(row.names = reg_df$gene,
                    dplyr::select(reg_df,
                                  gene_FC,
                                  mir_FC,
                                  dnam_quot))
 
-hist(k_tb$dnam_quot)
+
+hist(scale(k_tb$dnam_quot)*1.5, breaks = 50)
 # Scaling (standardization - x-mean/sd)
 # k_tb <- scale(k_tb) %>%
 #   as.data.frame()
 
 
-#k_tb$dnam_quot <- scale(k_tb$dnam_quot)
+k_tb$dnam_quot <- 2*(k_tb$dnam_quot)
 # Doubling values so that the colors are more intense
-k_tb$dnam_quot <- k_tb$dnam_quot*2
+#k_tb <- k_tb*2
 
-hist(k_tb$dnam_quot)
+# hist(k_tb$dnam_quot, breaks = 20)
+# hist(k_tb$gene_FC, breaks = 20)
+# hist(k_tb$mir_FC, breaks = 20)
 
 # All NA values are 0
+
+k_tb$dnam_quot <- scale(k_tb$dnam_quot)
+k_tb$gene_FC <- scale(k_tb$gene_FC)
+k_tb$mir_FC <- scale(k_tb$mir_FC)
+
 k_tb[is.na(k_tb)] <- 0
 ```
 
 
 ```{r}
-kmeansHeatmap(k_tb, clusters= 10:14, nstart = 60)
+kmeansHeatmap(k_tb, clusters= 10, nstart = 60, GSEA = FALSE)
 ```
 
 Testing the plotting function
 ```{r}
-kmeans_tb <- readRDS("clustering/20220712_1331__12clusters_60nstart.rds")
+kmeans_file <- "clustering/20220712_1525__12clusters_60nstart"
+kmeans_tb <- readRDS(paste0(kmeans_file,".rds"))
 
 plotKmeansPheatmap(kmeans_tb)
+kmeans_tb %>%
+  group_by(kmeans) %>%
+  arrange(desc(gene_FC))
+
+kmeans_gost <- gseaOnKmeans(kmeans_tb)
+```
+Trying to plot values of FC and dnam quot in box plots to grasp the feeling for those numbers.
+```{r}
+FC_box <- data.frame(label = c(rep("gene", length(k_tb$gene_FC)),
+                               rep("mir", length(k_tb$mir_FC)),
+                               rep("dnam", length(k_tb$dnam_quot))),
+                     value = c(k_tb$gene_FC,
+                               k_tb$mir_FC,
+                               k_tb$dnam_quot)) %>%
+  filter(!is.na(value))
+
+boxplot(value ~ label, data=FC_box)
+
 ```
 
 

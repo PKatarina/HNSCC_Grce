@@ -68,14 +68,14 @@ Building index with: For RNA seq mapping index is built from the gencode
 transcirpt data from hg19 assembly:
 <https://www.gencodegenes.org/human/release_19.html> The bash call for
 salmon to build the index is this:
-```{bash}
+```{bash, eval=FALSE}
     salmon index -t gencode.v19.pc_transcripts.fa.gz -i homosapiens_hg19_gencode_transcripts
 ```
 Mapping with Salmon. Mapping was done on a cluster with salmon tool. the
 Folder has to contain folder with data (mRNA_data) and the index file
 that was built. Data is saved in individual folders that are named
 OV401, OV402, ... OV413.
-```{bash}
+```{bash, eval=FALSE}
     for fn in mRNA_data/OV{401..413};
     do
     samp=`basename ${fn}`
@@ -115,7 +115,7 @@ ensembl gene ids and txids from salmon. After tx2gene object is built we
 input it in the tximport function. Next we can build an DESeq object
 wiht DESeqDataSetFromTximport function. gff3 file -
 <https://www.gencodegenes.org/human/release_19.html>
-```{bash}
+```{bash, eval=FALSE  }
 wget -P data https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_19/gencode.v19.annotation.gff3.gz
 ```
 
@@ -162,7 +162,7 @@ mRNA_dds <-
 rownames(mRNA_dds) <- str_split(rownames(mRNA_dds),"\\.", simplify = T)[,1]
 
 # adding colnames
-colnames(mRNA_dds) <- mRNA_coldata$Sample.ID
+colnames(mRNA_dds) <- mRNA_coldata$GRCE.NAME
 
 # filtering rows low counts
 keep <- rowSums(counts(mRNA_dds)) > 10
@@ -236,10 +236,15 @@ estimation of dispersion values and fits a generalized linear model.
 ```{r mRNA Running the DESeq function, cache=FALSE, message=FALSE}
 mRNA_dds <- DESeq(mRNA_dds, betaPrior = T)
 ```
+```{r, eval=FALSE}
+saveRDS(mRNA_dds, file = "outputs/RDS/mRNA_dds.rds")
+```
 
 Differential expression on cancer control group
 ```{r mRNA DE cancer-control}
-mRNA_res <- results(mRNA_dds, contrast = c("Hist","cancer","control"))
+mRNA_res <- results(mRNA_dds, 
+                    contrast = c("Hist","cancer","control"),
+                    cooksCutoff = TRUE)
 
 mRNA_res
 ```
@@ -281,9 +286,9 @@ gost_mRNA$result$query <- "DE genes vs genome"
 gostplot(gost_mRNA ,capped = F, interactive = T)
 
 publish_gostplot(gostplot(gost_mRNA ,capped = F, interactive = F),
-                 highlight_terms = read.csv("inputs/GSEA_terms/gost_mRNA_terms.txt", 
+                 highlight_terms = read.csv("GSEA_terms.txt", 
                                             header = F)[,1],
-                 filename = "outputs/figures/gost_plot_mRNA_highlighted.png")
+                 filename = "outputs/gost_plot_mRNA_highlighted.png")
 ```
 
 DE genes on background. Results are similar, which leads to conclude
@@ -536,7 +541,7 @@ Regularized logartihm (rlog) transformation
 behaves similarly to the log2 transformation. It is slower than the VST
 but recomended for small datasets (n\<30).
 ```{r mir rlog transformation}
-mir_rld <- rlog(mir_dds)
+mir_rld <- DESeq2::rlog(mir_dds)
 ```
 
 **Sample distance** To asses overall similarity between samples we
@@ -546,7 +551,7 @@ Euclidean distance.
 
 Triangle sample distance heatmap
 
-```{r mir sample distance heatmap-triangle}
+```{r mir sample distance heatmap-triangle, eval=FALSE}
 mir_annot_row <- as.data.frame(colData(mir_rld)[,c("Hist","Tissue", "HPV")])
 
 triangleHeatMap(assay(mir_rld),
@@ -557,15 +562,16 @@ triangleHeatMap(assay(mir_rld),
 
 ```{r mir PCA plot}
 # selecting data for plotting pca
-mRNA_pcadata <- 
+mir_pcadata <- 
   DESeq2::plotPCA(mir_rld, 
                   intgroup = c("Hist", "HPV", "Tissue"),
-                  returnData = TRUE)
+                  returnData = TRUE,
+                  ntop=560)
 # selecting variance
-percentVar <- round(100 * attr(mRNA_pcadata, "percentVar"))
+percentVar <- round(100 * attr(mir_pcadata, "percentVar"))
 
 # plotting pca data
-ggplot(mRNA_pcadata, aes(x = PC1, y = PC2, color = HPV, shape = Hist)) +
+ggplot(mir_pcadata, aes(x = PC1, y = PC2, color = HPV, shape = Hist)) +
   geom_point(size =3) +
   xlab(paste0("PC1: ", percentVar[1], "% variance")) +
   ylab(paste0("PC2: ", percentVar[2], "% variance")) +
@@ -585,13 +591,15 @@ The call to DESeq function preforms the estimation of size factors,
 estimation of dispersion values and fits a generalized linear model.
 
 ```{r mir Running the DESeq function, cache=FALSE, message=FALSE}
-mir_dds <- DESeq(mir_dds, betaPrior = T)
+mir_dds <- DESeq(mir_dds, 
+                 betaPrior = T)
 ```
 
 Differential expression on cancer control group
 ```{r mir DE cancer-control}
-mir_res <- results(mir_dds, contrast = c("Hist","cancer","normal"))
-
+mir_res <- results(mir_dds, 
+                   contrast = c("Hist","cancer","normal"),
+                   cooksCutoff = TRUE)
 mir_res
 ```
 
@@ -856,6 +864,30 @@ dnam_res_sites <- get.table(diff_meth,
 head(dnam_res)
 ```
 
+```{r}
+dnam_normal_samples <- filter(pheno(rnb_set), Sample_group != "Cancer") %>%
+  pull(Sample_ID) %>%
+  as.vector()
+diff_meth_HPV <- 
+  rnb.execute.computeDiffMeth(remove.samples(rnb_set, dnam_normal_samples),
+                              pheno.cols = "HPV",
+                              region.types = "cpgislands")
+
+
+# Diff methylation table for CpG islands
+dnam_res_HPV <- get.table(diff_meth_HPV,
+                      get.comparisons(diff_meth_HPV)[1],
+                      "cpgislands",
+                      return.data.frame =T)
+
+# Diff methylation table for CpG sites, used for volcano plot
+dnam_res_sites_HPV <- get.table(diff_meth_HPV,
+                      get.comparisons(diff_meth_HPV)[1],
+                      "sites",
+                      return.data.frame =T)
+```
+
+
 Summary statistic of significant cpg island differential methylation.
 ```{r DNAm summary on DM}
 summary(filter(dnam_res, comb.p.adj.fdr < 0.05))
@@ -949,6 +981,14 @@ hist(dplyr::filter(dnam_res_sites, padj < 0.05)$log.quot,
      col="darkgreen",
      border="white")
 
+volcano <- data.frame((dnam_res_sites)) %>%
+  dplyr::mutate(diffexpressed = dplyr::case_when(
+    padj < PVAL.TRESH & log.quot > LFC.TRESH ~ "Hypermethylated",
+    padj < PVAL.TRESH & log.quot < -LFC.TRESH ~ "Hypomethylated",
+    TRUE ~ "Not significant"))
+
+
+volcano$diffexpressed%>% table()
 ```
 
 
@@ -980,8 +1020,9 @@ write_xlsx(mRNA_res_HPV, path = paste0("outputs/tables/",format(Sys.time(), "%Y%
 write.csv(counts(mRNA_dds["ENSG00000147889"], normalize=FALSE), "outputs/p16_counts.csv")
 
 ```
+# Saving RDS files
 Saving objects for further analysis as RDS
-```{r RDS}
+```{r RDS, eval=FALSE}
 #mRNA
 saveRDS(mRNA_dds,"outputs/RDS/mRNA_dds.rds")
 saveRDS(mRNA_dds_HPV,"outputs/RDS/mRNA_dds_HPV.rds")

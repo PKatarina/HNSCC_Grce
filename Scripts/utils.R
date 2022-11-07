@@ -4,6 +4,7 @@ library(stringr)
 # library(multiMiR)
 library(RColorBrewer)
 library(pheatmap)
+library(gprofiler2)
 
 
 idMap <- function(ensembl.id, genes_file){
@@ -72,7 +73,8 @@ integrateOmicsData <- function(mrna_res_obj, mir_res_obj, dnam_res_obj, mir_targ
   return(res)
 }
 
-plot_pheatmap <- function(dat, colVec, colBreaks, annotRows, gaps, prefix){
+# Do not use
+plot_pheatmap_ <- function(dat, colVec, colBreaks, annotRows, gaps, prefix){
   f <- paste0(prefix, ".png") # prefix defines plot filename
   
   # various colour schemes for annotation columns
@@ -132,13 +134,13 @@ calcGaps <- function(vec){
   return(gps)
 }
 
-plotKmeansPheatmap <- function(tb, additional_annotation = NULL, custom_cluster_names = NULL, file=NA ){
+plotKmeansPheatmap <- function(tb, additional_annotation = NULL, custom_cluster_names = NULL, file=NA, breaks = NULL ){
   
   # Number of clusters
   c <- length(unique(tb$kmeans))
   
   # Colors
-  heat_colors <-colorRampPalette(brewer.pal(n=9, name="RdBu"))(100)
+  heat_colors <-colorRampPalette(brewer.pal(n=9, name="RdBu"))(7)
   clusters_annot_colors <- brewer.pal(12, "Paired")[1:c]
   # Named vectors for clusters
   if(is.null(custom_cluster_names)){
@@ -147,7 +149,7 @@ plotKmeansPheatmap <- function(tb, additional_annotation = NULL, custom_cluster_
 
   
   # For continuous colors (passed in breaks in pheatmap)
-  rg <- max(abs(select(tb, -kmeans)))
+  rg <- max(abs(dplyr::select(tb, -kmeans)))
   
   # Specify white space between clusters
   gps <- calcGaps(tb$kmeans)
@@ -164,15 +166,17 @@ plotKmeansPheatmap <- function(tb, additional_annotation = NULL, custom_cluster_
   # Additional annotations
   if(!is.null(additional_annotation)){pass}
   
+  
 
 
   # Main plotting function
   pheatmap(
-    mat=select(tb, -kmeans),
+    mat=dplyr::select(tb, -kmeans),
     color=heat_colors,
-    breaks = seq(-rg, rg, length.out = 100),
+    #breaks = seq(-rg, rg, length.out = 100),
     annotation_row=annotRows,
     annotation_colors=annotColors,
+    breaks = breaks,
     show_rownames=F,
     fontsize_row=5,
     gaps_row=gps,
@@ -183,7 +187,36 @@ plotKmeansPheatmap <- function(tb, additional_annotation = NULL, custom_cluster_
 
 }
 
-kmeansHeatmap <- function(tb, ann_tb=FALSE, clusters, nstart, GSEA=FALSE){
+gseaOnKmeans <- function(tb, custom_sources=NULL){
+  # @description: gsea on kmeans table and saving it in xlsx format
+  
+  if(is.null(custom_sources)){
+    GSEA_SOURCES <- c("GO:BP","CORUM","KEGG","REAC","WP","MIRNA", "TF")
+  }
+  else{
+    GSEA_SOURCES <- custom_sources
+  }
+
+  # Preparing list 
+  query <- list()
+  for (c in unique(tb$kmeans)) {
+    query[[c]] <- rownames(dplyr::filter(tb, kmeans == c))  
+  }
+  
+  print(paste0("GSEA on kmeans table with ", c, " clusters."))
+  
+  gost_k <-gost(query = query,
+               organism= "hsapiens",
+               exclude_iea=TRUE,
+               domain_scope="annotated",
+               ordered_query=F,
+               sources=GSEA_SOURCES)
+  
+  return(gost_k)
+  
+}
+
+kmeansHeatmap <- function(tb, ann_tb=FALSE, clusters, nstart, GSEA=FALSE, pheatmap_breaks){
   # @ description
   
   timestamp <- Sys.time()
@@ -193,23 +226,46 @@ kmeansHeatmap <- function(tb, ann_tb=FALSE, clusters, nstart, GSEA=FALSE){
   for(c in clusters){
     print(paste0("Processing kmeans with ", c, " clusters."))
     
-    # nstart ensures stability of results, otherwise you get a different kmeans     # every time
+    # nstart ensures stability of results, otherwise you get a different kmeans
+    # every time
     k <- kmeans(tb, centers = c, nstart = nstart)
     
     # reorder rows by clustering
-    tb <- tb %>%
-      dplyr::mutate(kmeans= as.numeric(k$cluster)) %>%
-      dplyr::arrange(kmeans)
+    
+    # tb <- tb %>%
+    #   dplyr::mutate(kmeans= as.numeric(k$cluster)) %>%
+    #   dplyr::arrange(gene_FC) %>%
+    #   dplyr::arrange(kmeans) 
+     # dplyr::summarise(Avg_group=mean(gene_FC)) %>%
+     #  dplyr::arrange(desc(gene_FC))
+    
+    
+    # ordering by mean values
+    tb_order <- tb %>%
+      group_by(kmeans) %>%
+      dplyr::summarise(avg_kmeans = mean(gene_FC)) %>%
+      dplyr::arrange(avg_kmeans)
+    
+    
+    
+    return(print(tb_order))
+    
+    
     
     # Timestamped filename
     filename = 
       paste0("clustering/",timestamp,"_", c, "clusters","_",nstart,"nstart")
     
+    
     # Passing kmeans results to the plotting function
-    plotKmeansPheatmap(tb, file = paste0(filename,".png"))
+    plotKmeansPheatmap(tb, file = paste0(filename,".png"), breaks = pheatmap_breaks)
     
     # Saving tables for later use
     saveRDS(tb, file = paste0(filename,".rds"))
+    
+    if(GSEA){
+      write.csv(dplyr::select(gseaOnKmeans(tb)$result, -parents), file = paste0(filename,".csv"))
+    }
   
   }
   
