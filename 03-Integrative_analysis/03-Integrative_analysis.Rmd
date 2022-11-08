@@ -180,14 +180,14 @@ Here we want to make a table that has only one row per mRNA so that we can explo
 reg_df <-
   integ_df %>%
   # Group by gene to compare their regulators
-  group_by(gene) %>%
+  dplyr::group_by(gene) %>%
   # Storing the best correlating mir into best_cor column
   # NA is for those that are not under mir regulation
-  mutate(best_cor=ifelse(!is.na(mir_r), mir[which.max(abs(mir_r))], NA)) %>%
+  dplyr::mutate(best_cor=ifelse(!is.na(mir_r), mir[which.max(abs(mir_r))], NA)) %>%
   # filtering out mirs that are not the best putative regulators
   dplyr::filter(is.na(mir) | mir == best_cor)  %>%
   # Storing the cgi with max abs value in best_cgi
-  mutate(best_cgi= ifelse(!is.na(dnam_quot),                                 dnam_condensed_ranges[which.max(abs(dnam_quot))],
+  dplyr::mutate(best_cgi= ifelse(!is.na(dnam_quot),                                 dnam_condensed_ranges[which.max(abs(dnam_quot))],
                                  NA)) %>%
   # Filtering out cgi that are not the best
   dplyr::filter(is.na(dnam_condensed_ranges) |
@@ -205,13 +205,13 @@ Using two unsupervised clustering methods SOM and kmeans to explore clusters of 
 K means clusters mRNA genes into k number of clusters in which each mRNA belongs to the cluster with the nearest mean (or cluster centroid). For more details look at the lecture materials from pmf machine learning.
 ```{r}
 
-#k_tb_old <- readxl::read_xlsx("data/kmeans_integrated_per_gene_df.xlsx")
-# Prepping kmeans table
-# k_tb <- data.frame(row.names = k_tb_old$gene,
-#                    dplyr::select(k_tb_old,
-#                                  gene_FC,
-#                                  mir_FC,
-#                                  dnam_quot = "dnam_FC"))
+k_tb_old <- readxl::read_xlsx("data/kmeans_integrated_per_gene_df.xlsx")
+##Prepping kmeans table
+k_tb <- data.frame(row.names = k_tb_old$gene,
+                   dplyr::select(k_tb_old,
+                                 gene_FC,
+                                 mir_FC,
+                                 dnam_quot = "dnam_FC"))
 
 k_tb <- data.frame(row.names = reg_df$gene,
                    dplyr::select(reg_df,
@@ -243,9 +243,16 @@ k_tb$mir_FC <- scale(k_tb$mir_FC)
 k_tb[is.na(k_tb)] <- 0
 ```
 
+```{r}
+kmeans_color <- colorRampPalette(brewer.pal(n=9, name="RdBu"))(7)
+kmeans_breaks <- c(-6,-4,-2,-0.000001,0.000001,2,4,6)
+kmeans_breaks_scaled <- c(-2.25,-1.5,-0.75,-0.000001,0.000001,0.75,1.5,2.25)
+```
+
 
 ```{r}
-kmeansHeatmap(k_tb, clusters= 10, nstart = 60, GSEA = FALSE)
+kmeansHeatmap(k_tb, clusters= 12, nstart = 55, GSEA = TRUE,
+              scaled = "unscaled")
 ```
 
 Testing the plotting function

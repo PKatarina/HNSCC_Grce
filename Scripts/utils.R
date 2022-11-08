@@ -126,11 +126,13 @@ calcGaps <- function(vec){
   # cluster heatmap
   
   # specify white space between clusters
-  x <- table(as.numeric(vec))
+  # using factor to keep the order of clusters from vec
+  x <- table(factor(vec, levels=unique(vec)))
   gps <- numeric(length(x))
   for(i in 1:length(x)){
     gps[i:length(x)] <- gps[i:length(x)]+x[i]
   }
+
   return(gps)
 }
 
@@ -153,20 +155,19 @@ plotKmeansPheatmap <- function(tb, additional_annotation = NULL, custom_cluster_
   
   # Specify white space between clusters
   gps <- calcGaps(tb$kmeans)
-  
+
   # Annotation row beside the heatmap
   annotRows <- data.frame(row.names = rownames(tb),
                           Cluster = as.numeric(tb$kmeans)) %>%
-    dplyr::arrange(Cluster) %>%
+    #dplyr::arrange(Cluster) %>%
     dplyr::mutate(Cluster = as.factor(Cluster))
   
   # Saving colors scheme to list (has to have the SAME name as in annotRows)
   annotColors=list(Cluster=clusters_annot_colors)
+  #rownames(tb) <- 1:nrow(tb)
 
   # Additional annotations
   if(!is.null(additional_annotation)){pass}
-  
-  
 
 
   # Main plotting function
@@ -191,7 +192,7 @@ gseaOnKmeans <- function(tb, custom_sources=NULL){
   # @description: gsea on kmeans table and saving it in xlsx format
   
   if(is.null(custom_sources)){
-    GSEA_SOURCES <- c("GO:BP","CORUM","KEGG","REAC","WP","MIRNA", "TF")
+    GSEA_SOURCES <- c("GO:BP","KEGG","REAC", "MIRNA", "TF")
   }
   else{
     GSEA_SOURCES <- custom_sources
@@ -204,7 +205,7 @@ gseaOnKmeans <- function(tb, custom_sources=NULL){
   }
   
   print(paste0("GSEA on kmeans table with ", c, " clusters."))
-  
+
   gost_k <-gost(query = query,
                organism= "hsapiens",
                exclude_iea=TRUE,
@@ -216,11 +217,38 @@ gseaOnKmeans <- function(tb, custom_sources=NULL){
   
 }
 
-kmeansHeatmap <- function(tb, ann_tb=FALSE, clusters, nstart, GSEA=FALSE, pheatmap_breaks){
+kmeansHeatmap <- function(tb, ann_tb=FALSE, clusters, nstart, GSEA=FALSE, scaled){
   # @ description
   
   timestamp <- Sys.time()
   timestamp <- format(timestamp, "%Y%m%d_%H%M_")
+  
+  
+  # COlors for clusters
+  #kmeans_color <- colorRampPalette(brewer.pal(n=9, name="RdBu"))(7)
+  
+  # Scaling as part of kmeans func
+  if(scaled == "dnam2") {
+    tb$dnam_quot <- 2*(tb$dnam_quot)
+    # kmeans color breaks for scaled
+    pheatmap_breaks <- c(-6,-4,-2,-0.000001,0.000001,2,4,6)
+  }
+  if(scaled == "scaled"){
+    tb$dnam_quot <- scale(tb$dnam_quot)
+    tb$gene_FC <- scale(tb$gene_FC)
+    tb$mir_FC <- scale(tb$mir_FC)
+    # kmeans color breaks for scaled
+    pheatmap_breaks <- c(-2.25,-1.5,-0.75,-0.000001,0.000001,0.75,1.5,2.25)
+
+  }
+  else{
+    pheatmap_breaks <- c(-6,-4,-2,-0.000001,0.000001,2,4,6)
+  }
+  # setting NAs to 0
+  tb[is.na(tb)] <- 0
+  
+
+  
 
   
   for(c in clusters){
@@ -230,31 +258,35 @@ kmeansHeatmap <- function(tb, ann_tb=FALSE, clusters, nstart, GSEA=FALSE, pheatm
     # every time
     k <- kmeans(tb, centers = c, nstart = nstart)
     
-    # reorder rows by clustering
     
-    # tb <- tb %>%
-    #   dplyr::mutate(kmeans= as.numeric(k$cluster)) %>%
-    #   dplyr::arrange(gene_FC) %>%
-    #   dplyr::arrange(kmeans) 
-     # dplyr::summarise(Avg_group=mean(gene_FC)) %>%
-     #  dplyr::arrange(desc(gene_FC))
+    # reorder rows by clustering
+    tb <- tb %>%
+      as.data.frame() %>%
+      dplyr::mutate(kmeans= as.numeric(k$cluster)) %>%
+      # Saving the rownames to column
+      dplyr::mutate(gene = rownames(tb))
+    
+
     
     
     # ordering by mean values
     tb_order <- tb %>%
       group_by(kmeans) %>%
       dplyr::summarise(avg_kmeans = mean(gene_FC)) %>%
-      dplyr::arrange(avg_kmeans)
+      dplyr::arrange(desc(avg_kmeans)) %>%
+      dplyr::mutate(k = 1:c)
     
+    tb <- left_join(tb_order, tb, by="kmeans") %>%
+      dplyr::select(gene, gene_FC, mir_FC, dnam_quot,  -avg_kmeans, kmeans = k) %>%
+      as.data.frame()
     
-    
-    return(print(tb_order))
-    
-    
-    
+    # Explicitly adding back rownames and dropping the gene column
+    rownames(tb) <- tb$gene
+    tb <- dplyr::select(tb, dplyr::everything(), -gene)
+
     # Timestamped filename
     filename = 
-      paste0("clustering/",timestamp,"_", c, "clusters","_",nstart,"nstart")
+      paste0("clustering/",timestamp,"_", c, "clusters","_",nstart,"nstart","_", scaled)
     
     
     # Passing kmeans results to the plotting function
