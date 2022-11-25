@@ -24,6 +24,7 @@ library(ggplot2)
 
 
 
+
 # source(file = file.path(getwd(), "scripts", "idMap.R"))
 # source(file = file.path(getwd(), "scripts", "integrateOmicsData.R"))
 # source(file = file.path(getwd(), "scripts", "kmeansHeatmap.R"))
@@ -76,12 +77,21 @@ simple_tb <-
 table(simple_tb [,c("mir","dnam")])
 
 
-
+png("outputs/venn.png", width = 1000, height = 700)
 venn::venn(x =list(simple_tb[simple_tb$dnam ==1,"genes"],
              simple_tb[simple_tb$mir ==1,"genes"]), 
-     zcolor = "style",
-     snames = c("DNA methylated","microRNA"))
+     zcolor = c("#ffdd2f","#ff4d2f"),
+     snames = c("DNA methylated","microRNA"),
+     opacity = 0.5,
+     plotsize = 100,
+     box = FALSE,
+     ilcs = 2,
+     file= "outputs/venn.png")
+dev.off()
+#save.image("outputs/Venn.png")
+
 ```
+
 ## GSEA analysis on simple_tb
 To explore the influence of different types of regulation we preform gsea on crude groups of genes where the genes are presneted in the venn.
 From the gostplot there are not many terms associated with genes that are ONLY under DNA methylation regulation (Only muscle contraction -REAC). In the intersection part there are terms that are involved in cell cycle regulation, regulation of transcription, .. Genes under mir regulation have many terms involved with the immune system, also some terms involved with cell mobility (cell-cell adhesion, cell migration, collagen degradation). The rest that are not under dnam or mir regulation have terms involved in muscle contractions and some immunological pathways. TF database added later, comment: In all groups there are many hits with TF.
@@ -137,7 +147,7 @@ for(q in names(query_ls)){
           text = element_text(size = 12),
           legend.position = "none") + 
     scale_fill_manual(values = gsea_bar_cols)+
-    ylim(0,472)+
+    ylim(0,480)+
     geom_text(aes(label = Freq), vjust = -0.3)+
     ylab("Number of terms")+
     xlab("")
@@ -204,22 +214,23 @@ Using two unsupervised clustering methods SOM and kmeans to explore clusters of 
 ## **kmeans**
 K means clusters mRNA genes into k number of clusters in which each mRNA belongs to the cluster with the nearest mean (or cluster centroid). For more details look at the lecture materials from pmf machine learning.
 ```{r}
-
-k_tb_old <- readxl::read_xlsx("data/kmeans_integrated_per_gene_df.xlsx")
-##Prepping kmeans table
-k_tb <- data.frame(row.names = k_tb_old$gene,
-                   dplyr::select(k_tb_old,
-                                 gene_FC,
-                                 mir_FC,
-                                 dnam_quot = "dnam_FC"))
+# k_tb_old <- readxl::read_xlsx("data/kmeans_integrated_per_gene_df.xlsx")
+# ##Prepping kmeans table
+# k_tb <- data.frame(row.names = k_tb_old$gene,
+#                    dplyr::select(k_tb_old,
+#                                  gene_FC,
+#                                  mir_FC,
+#                                  dnam_quot = "dnam_FC"))
 
 k_tb <- data.frame(row.names = reg_df$gene,
                    dplyr::select(reg_df,
                                  gene_FC,
                                  mir_FC,
                                  dnam_quot))
+```
 
-
+I have put this whole chunk in the function 
+```{r, eval=FALSE}
 hist(scale(k_tb$dnam_quot)*1.5, breaks = 50)
 # Scaling (standardization - x-mean/sd)
 # k_tb <- scale(k_tb) %>%
@@ -243,7 +254,7 @@ k_tb$mir_FC <- scale(k_tb$mir_FC)
 k_tb[is.na(k_tb)] <- 0
 ```
 
-```{r}
+```{r, eval=FALSE}
 kmeans_color <- colorRampPalette(brewer.pal(n=9, name="RdBu"))(7)
 kmeans_breaks <- c(-6,-4,-2,-0.000001,0.000001,2,4,6)
 kmeans_breaks_scaled <- c(-2.25,-1.5,-0.75,-0.000001,0.000001,0.75,1.5,2.25)
@@ -251,21 +262,27 @@ kmeans_breaks_scaled <- c(-2.25,-1.5,-0.75,-0.000001,0.000001,0.75,1.5,2.25)
 
 
 ```{r}
-kmeansHeatmap(k_tb, clusters= 12, nstart = 55, GSEA = TRUE,
+kmeansHeatmap(k_tb, clusters= 8:15, nstart = 100, GSEA = TRUE,
               scaled = "unscaled")
 ```
+Looping through multiple scaling versions
+```{r}
+scaling_options <- c("dnam2", "scaled", "unscaled")
+for(scale in scaling_options){
+  kmeansHeatmap(k_tb, clusters= 10:12, nstart = 50, GSEA = TRUE,
+              scaled = scale)
+}
+
+```
+
 
 Testing the plotting function
 ```{r}
-kmeans_file <- "clustering/20220712_1525__12clusters_60nstart"
+kmeans_file <- "clustering/8-20clusters_100nstart/20221110_1148__11clusters_100nstart_scaled"
 kmeans_tb <- readRDS(paste0(kmeans_file,".rds"))
 
-plotKmeansPheatmap(kmeans_tb)
-kmeans_tb %>%
-  group_by(kmeans) %>%
-  arrange(desc(gene_FC))
 
-kmeans_gost <- gseaOnKmeans(kmeans_tb)
+kmeans_tb$symbol <- idMap(rownames(kmeans_tb), genes_file = genes_dir)
 ```
 Trying to plot values of FC and dnam quot in box plots to grasp the feeling for those numbers.
 ```{r}

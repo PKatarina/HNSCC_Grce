@@ -1,6 +1,6 @@
 ---
 title: "1-Exploratory analysis and differential expression"
-author: "Katarina Prskalo"
+author: "Katarina Mandić"
 date: "`r format(Sys.time(), '%d %b, %Y')`"
 output:
   html_document:
@@ -234,7 +234,7 @@ mRNA_annot_row <- as.data.frame(colData(mRNA_rld)[,c("Hist","Tissue", "HPV")])
 The call to DESeq function preforms the estimation of size factors,
 estimation of dispersion values and fits a generalized linear model.
 ```{r mRNA Running the DESeq function, cache=FALSE, message=FALSE}
-mRNA_dds <- DESeq(mRNA_dds, betaPrior = T)
+mRNA_dds <- DESeq(mRNA_dds, betaPrior = TRUE)
 ```
 ```{r, eval=FALSE}
 saveRDS(mRNA_dds, file = "outputs/RDS/mRNA_dds.rds")
@@ -336,6 +336,14 @@ res.cN.nN <-
   #results(mRNA_dds_HPV, contrast=c("HistHPV","cancerN","normalN"), tidy = T)
   results(mRNA_dds_HPV, contrast=c("HistHPV","cancer0","control0"), tidy = T)
 # Contrasting between HPV negative and positive
+res.cP.cN <- 
+  #results(mRNA_dds_HPV, contrast=c("HistHPV","cancerP","cancerN"), tidy = T)
+  results(mRNA_dds_HPV, 
+          contrast=c("HistHPV","cancer1","cancer0"),
+          tidy = F)
+
+summary(res.cP.cN)
+
 res.cP.cN <- 
   #results(mRNA_dds_HPV, contrast=c("HistHPV","cancerP","cancerN"), tidy = T)
   results(mRNA_dds_HPV, contrast=c("HistHPV","cancer1","cancer0"), tidy = T)

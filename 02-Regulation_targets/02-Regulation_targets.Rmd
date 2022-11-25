@@ -279,6 +279,35 @@ Some of the cpg (19) islands overlap more than one gene promoter, and 72 genes h
 
 GSEA GSEA analysis on genes that are under methylation regulation. There many terms from TF source which is expected. Since the differentially methylated cpg islands that were selected are in promoter regions of those genes. Also in from the reactom database there are many terms involved in the regulation of the cell cycle.
 
+
+```{r, all DEGs}
+targ_dnam_mRNA <- readRDS("outputs/RDS/targ_dnam_mRNA.rds")
+# Using only part of sources
+GSEA_SOURCES <- c("GO:BP","CORUM","KEGG","REAC","WP","MIRNA", "TF")
+
+query <- mcols(targ_dnam_mRNA) %>%
+           as.data.frame() %>%
+           #filter(log.quot >0 & gene_FC <0) %>%
+           pull(ensembl)
+
+# Calling gost function
+gost_res <- 
+    gost(query,
+      #targ_dnam_mRNA$ensembl,
+       organism= "hsapiens",
+       exclude_iea=TRUE,
+       domain_scope="annotated",
+       ordered_query=F,
+      #custom_bg = rownames(DE_mRNA),
+       sources=GSEA_SOURCES)
+
+# Change query name
+gost_res$result$query <- "DEGs with DM promoters"
+
+gostplot(gost_res, capped = FALSE)
+writexl::write_xlsx(gost_res$result, path ="outputs/GSEA_on_DEGs_with_DM_promoters.xlsx")
+```
+
 ```{r}
 targ_dnam_mRNA <- readRDS("outputs/RDS/targ_dnam_mRNA.rds")
 # Using only part of sources
@@ -286,7 +315,7 @@ GSEA_SOURCES <- c("GO:BP","CORUM","KEGG","REAC","WP","MIRNA", "TF")
 
 query <- mcols(targ_dnam_mRNA) %>%
            as.data.frame() %>%
-           filter(log.quot >0 & gene_FC <0) %>% 
+           filter(log.quot >0 & gene_FC <0) %>%
            pull(ensembl)
 
 # Calling gost function
@@ -305,7 +334,6 @@ gost_res$result$query <- "DE genes with DM promoters"
 
 gostplot(gost_res, capped = FALSE)
 ```
-
 325 downreg have hypermeth
 612 upreg have hypomethyl
 ```{r}
