@@ -1,0 +1,367 @@
+---
+title: "Plots for paper"
+author: "Katarina Mandić"
+date: "`r format(Sys.time(), '%d %b, %Y')`"
+output:
+  html_document:
+    css: style.css
+---
+ 
+
+# Description
+Plotting for the paper
+
+# Libraries
+```{r Libraries, message=FALSE}
+library(ggplot2)
+library(DESeq2)
+library("pheatmap")
+library("RColorBrewer")
+library(dplyr)
+library(gprofiler2)
+library(rprojroot)
+
+# Leads to the project directory
+project_dir <- find_rstudio_root_file()
+
+source(file = file.path(project_dir,"src", "utils.R"))
+
+genes_dir <- file.path(project_dir, "data","input", "genes.hg19.ensembl.rds")
+```
+
+# Load data
+```{r}
+mRNA_dds <- readRDS(file = file.path(project_dir, "data/processed/mRNA_dds.rds"))
+                      
+mir_dds <- readRDS(file = file.path(project_dir, "data/processed/mir_dds.rds"))
+rnb_set <- readRDS(file = file.path(project_dir, "data/processed/rnb_set.rds"))
+
+# This table is the one for the paper, but contains all samples so its usefull
+samples_ppr <- readxl::read_xlsx(file.path(project_dir, "data/input/samples.xlsx"))
+
+# Full annotation
+annot_full <- readxl::read_xlsx(file.path(project_dir, "data/raw/hnscc_annot.xlsx"))
+```
+
+
+# PCA plot on mRNA data
+```{r}
+mRNA_rld <- DESeq2::rlog(mRNA_dds)
+```
+
+
+```{r}
+# selecting data for plotting pca
+mRNA_pcadata <- 
+  DESeq2::plotPCA(mRNA_rld, 
+                  intgroup = c("Hist", "HPV", "Tissue"),
+                  returnData = TRUE) %>%
+  dplyr::rename(Sample ="Hist") %>%
+  mutate(HPV = ifelse(HPV==1, "P","N"))
+# selecting variance
+percentVar <- round(100 * attr(mRNA_pcadata, "percentVar"))
+
+
+# Color for PCA 
+col_pca <- c(
+  # Dark red
+  brewer.pal(8, "Reds")[7],
+  brewer.pal(8, "Blues")[7]
+)
+
+
+# plotting pca data
+ggplot(mRNA_pcadata, aes(x = PC1, y = PC2, color = Tissue, shape = HPV, fill = Sample)) +
+  geom_point(size =4,
+             stroke =1.2) +
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+   theme(#panel.grid = element_blank(), 
+         # panel.background = element_rect(fill = brewer.pal(3,"Greys")[1]),
+     panel.background = element_rect(fill = "white"),
+         panel.border = element_rect(fill = "transparent"),
+         panel.grid = element_line(color = brewer.pal(5,"Greys")[1]),
+         legend.key=element_blank(),
+         axis.title=element_text(size=18),
+         legend.text=element_text(size=18),
+         legend.title=element_text(size=18))+
+  coord_fixed() +
+  #ggtitle("PCA with rlog data")+
+  scale_shape_manual(values = c(21, 22) )+
+  scale_color_manual(values = c("black", brewer.pal(5,"Greys")[3]) )+
+  scale_fill_manual(values= col_pca)+
+  guides(fill=guide_legend(override.aes=list(shape=21)))+
+  guides(color=guide_legend(override.aes=list(shape=21))) +
+  guides(fill=guide_legend(override.aes=list(shape=21,fill=c(col_pca))))
+
+  #geom_text_repel(aes(label = colData(mRNA_rld)$Sample.ID), size =3)
+  #geom_text_repel(aes(label = colData(mRNA_rld)$GRCE.NAME), size =3)
+
+```
+
+Saving to file
+```{r, eval=FALSE}
+ggsave(filename = file.path(project_dir, "data/output/figures/PCA_mRNA.png"))
+```
+
+# miR distance
+Since I made a presentable PCA plot for mRNA data I will first make sample distance plot for miR
+```{r }
+# Variance stabilizng 
+mir_rld <- rlog(mir_dds)
+# calculating sample distance matrix
+sampleDist_mir <- stats::dist(t(assay(mir_rld)), method = "euclidean")
+sampleDist_mir <- as.data.frame(as.matrix(sampleDist_mir))
+```
+
+
+
+```{r}
+colors <- colorRampPalette( rev(brewer.pal(9, "Oranges")) )(255)
+
+annot_col <- list(
+  # Tumor colors
+  Hist = setNames(c(brewer.pal(8, "Reds")[7],  brewer.pal(8, "Blues")[7]),
+                   c("cancer", "control")),
+  # HPV colors
+  HPV = setNames( c("forestgreen","gold"), 
+                  c("P","N")),
+  # Tissue colors
+  Tissue = setNames(c(brewer.pal(8, "Dark2")[3], brewer.pal(8, "Dark2")[7]),
+                    c("OP","O")),
+    # Smoking drinking colors
+  Smoking_Drinking = setNames( c("forestgreen","gold", "white"), 
+                  c("0","1", "?")),
+  Age = brewer.pal(9, "Greys"),
+  Gradus = setNames(brewer.pal(9, "Reds")[c(1,3,5,7,9)],
+                    c("nema nalaza", "0", "1", "2", "3"))
+)
+
+annot_data <- colData(mir_rld) %>% 
+  as.data.frame() %>%
+  dplyr::select(Hist, Tissue, HPV) %>%
+  # changing normal to control in Hist
+  mutate(Hist = ifelse(Hist == "normal", "control", "cancer"))
+
+# additional annotations
+annot_data <-
+  left_join(tibble::rownames_to_column(annot_data), 
+            # first group of annot
+          dplyr::select(annot_full, Sample_ID, Smoking_Drinking, Age, Gradus),
+          # second group
+          # select(annot_full, Sample_ID, Stage, Smoking_Drinking, Gradus),
+          by = c("rowname" = "Sample_ID")) %>%
+  tibble::column_to_rownames("rowname")
+
+
+pheatmap(sampleDist_mir,
+         # clustering_distance_rows = sampleDist_mir,
+         # clustering_distance_cols = sampleDist_mir,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         col = colors,
+         treeheight_col = 0,
+         treeheight_row = 0,
+         #annotation_row = annot_data,
+         annotation_col = annot_data,
+         annotation_colors = annot_col,
+         show_colnames = TRUE,
+         show_rownames = FALSE,
+         annotation_names_col = FALSE)
+```
+
+Saving to file
+```{r, eval=FALSE}
+pheatmap(sampleDist_mir,
+         # clustering_distance_rows = sampleDist_mir,
+         # clustering_distance_cols = sampleDist_mir,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         col = colors,
+         treeheight_col = 0,
+         treeheight_row = 0,
+         #annotation_row = annot_data,
+         annotation_col = annot_data,
+         annotation_colors = annot_col,
+         show_colnames = TRUE,
+         show_rownames = FALSE,
+         annotation_names_col = FALSE,
+         #fontsize = 20,
+         #width = 10,
+         #cellwidth = 25,
+         filename = file.path(project_dir, "data/output/figures/extra_annot_sampleDistance_miR.png"))
+```
+
+
+# DNAm distance
+```{r}
+# Novariance stabilizarion?
+# calculating sample distance matrix
+sampleDist_dnam <- stats::dist(t(meth(rnb_set)))
+sampleDist_dnam <- as.data.frame(as.matrix(sampleDist_dnam))
+```
+
+```{r}
+colors <- colorRampPalette( rev(brewer.pal(9, "Greens")) )(255)
+# I have a full list in mir
+# annot_col <- list(
+#   # Tumor colors
+#   Hist = setNames(c(brewer.pal(8, "Reds")[7],  brewer.pal(8, "Blues")[7]),
+#                    c("cancer", "control")),
+#   # HPV colors
+#   HPV = setNames( c("forestgreen","gold"), 
+#                   c("P","N")),
+#   # Tissue colors
+#   Tissue = setNames(c(brewer.pal(8, "Dark2")[3], brewer.pal(8, "Dark2")[7]),
+#                     c("OP","O")),
+#   # Smoking drinking colors
+#   Smoking_Drinking = setNames( c("forestgreen","gold", "pink"), 
+#                   c("0","1", "?"))
+# )
+
+
+
+annot_data <- pheno(rnb_set) %>% 
+  as.data.frame() %>%
+  dplyr::mutate(Hist = ifelse(Sample_group == "Cancer", "cancer", "control")) %>%
+  dplyr::select(Sample_ID, Hist, HPV) %>%
+  # Adding tissue locations from sample_ppr table 
+  left_join(dplyr::select(samples_ppr,ID, Tissue = "Location") %>%
+              mutate(ID=tolower(ID)),
+            by = c("Sample_ID" = "ID")) %>%
+  dplyr::select(Hist, Tissue, HPV)
+
+rownames(annot_data) <- pheno(rnb_set)$Sample_ID
+
+
+
+# additional annotations
+annot_data <-
+  left_join(tibble::rownames_to_column(annot_data), 
+            # first group of annot
+          dplyr::select(annot_full, Sample_ID, Smoking_Drinking, Age, Gradus) %>%
+          # second group
+          # select(annot_full, Sample_ID, Stage, Smoking_Drinking, Gradus) %>%
+            mutate(Sample_ID = tolower(Sample_ID)),
+          by = c("rowname" = "Sample_ID")) %>%
+  tibble::column_to_rownames("rowname")
+
+pheatmap(sampleDist_dnam,
+         # clustering_distance_rows = sampleDist_dnam,
+         # clustering_distance_cols = sampleDist_dnam,
+         col = colors,
+         treeheight_col = 0,
+         treeheight_row = 0,
+         #annotation_row = annot_data,
+         annotation_col = annot_data,
+         annotation_colors = annot_col,
+         show_colnames = TRUE,
+         show_rownames = FALSE,
+         annotation_names_col = FALSE)
+
+```
+
+Saving to file
+```{r, eval=FALSE}
+pheatmap(sampleDist_dnam,
+         # clustering_distance_rows = sampleDist_dnam,
+         # clustering_distance_cols = sampleDist_dnam,
+         col = colors,
+         treeheight_col = 0,
+         treeheight_row = 0,
+         #annotation_row = annot_data,
+         annotation_col = annot_data,
+         annotation_colors = annot_col,
+         show_colnames = TRUE,
+         show_rownames = FALSE,
+         annotation_names_col = FALSE,
+         #fontsize = 20,
+         #width = 10,
+         #cellwidth = 25,
+         filename =file.path(project_dir, "data/output/figures/extra_annot_sampleDistance_dnam.png"))
+```
+
+
+# DE expression gsea
+
+## Loading data
+```{r}
+mRNA_res <- readRDS(file.path(project_dir, "data/processed/mRNA_res.rds"))
+
+```
+
+
+```{r}
+mRNA_gost <- as.data.frame(mRNA_res)%>%
+  filter(padj < 0.05) %>%
+  rownames() %>%
+  unique()
+
+
+# Using only part of sources
+GSEA_SOURCES <- c("GO:BP","KEGG","REAC")
+
+
+# Call on the gost 
+mRNA_gost <- 
+  gost(mRNA_gost,
+       organism= "hsapiens",
+       exclude_iea=TRUE,
+       domain_scope="annotated",
+       ordered_query=F,
+       sources=GSEA_SOURCES)
+
+# Change query name
+mRNA_gost$result$query <- ""
+
+highlighted_gsea_terms <- read.csv(file.path(project_dir,"data/input/GSEA_terms.txt"),
+                                   header = F)[,1]
+
+#Plot and table of significant results
+gostplot(mRNA_gost ,capped = F, interactive = T)
+
+publish_gostplot(gostplot(mRNA_gost ,capped = F, interactive = F),
+                 highlight_terms = highlighted_gsea_terms)
+
+```
+
+```{r, eval=FALSE}
+publish_gostplot(gostplot(mRNA_gost ,capped = F, interactive = F),
+                 highlight_terms = highlighted_gsea_terms,
+                 filename = file.path(project_dir, "data/output/figures/gost_plot_mRNA_highlighted.png"))
+```
+
+
+# mir targets histograms
+will not be doing that
+## Loading data
+```{r, eval=FALSE}
+targ_mir_mRNA <- 
+  readRDS( "../02-Regulation_targets/outputs/RDS/targ_mir_mRNA.rds")
+
+cor_mir <-
+  readRDS("../02-Regulation_targets/outputs/RDS/cor_mir.rds")
+```
+
+## plot
+```{r, eval=FALSE}
+mir_freq <- 
+  table(cor_mir$mir) %>%
+  as.data.frame()
+
+
+ggplot(mir_freq, aes(Freq))+
+  geom_histogram()+
+  stat_bin(binwidth = 1, bins = 50)
+```
+# Mir mRNA scatterplots
+
+```{r}
+
+```
+
+
+# Session Info
+```{r Session info}
+sessionInfo()
+```
