@@ -142,7 +142,7 @@ plotKmeansPheatmap <- function(tb, additional_annotation = NULL, custom_cluster_
   c <- length(unique(tb$kmeans))
   
   # Colors
-  heat_colors <-colorRampPalette(brewer.pal(n=9, name="RdBu"))(7)
+  heat_colors <- colorRampPalette(brewer.pal(n=9, name="RdBu"))(7)
   clusters_annot_colors <- brewer.pal(12, "Paired")[1:c]
   # Named vectors for clusters
   if(is.null(custom_cluster_names)){
@@ -217,7 +217,7 @@ gseaOnKmeans <- function(tb, custom_sources=NULL){
   
 }
 
-kmeansHeatmap <- function(tb, ann_tb=FALSE, clusters, nstart, GSEA=FALSE, scaled, directory){
+kmeansHeatmap <- function(tb, ann_tb=FALSE, clusters, nstart, GSEA=FALSE, scaled, directory, plot_cost=FALSE){
   # @ description
   
   timestamp <- Sys.time()
@@ -248,7 +248,7 @@ kmeansHeatmap <- function(tb, ann_tb=FALSE, clusters, nstart, GSEA=FALSE, scaled
   tb[is.na(tb)] <- 0
   
 
-  
+  cost_vec <- vector(mode = "numeric")
 
   
   for(c in clusters){
@@ -298,7 +298,46 @@ kmeansHeatmap <- function(tb, ann_tb=FALSE, clusters, nstart, GSEA=FALSE, scaled
     if(GSEA){
       write.csv(dplyr::select(gseaOnKmeans(tb)$result, -parents), file = paste0(filename,".csv"))
     }
+    if(plot_cost){
+      cost_vec <- append(cost_vec, k$tot.withinss)
+    }
   
   }
   
+  if(plot_cost){
+    cost_data <- data.frame(cl = clusters, cost=cost_vec)
+    print(cost_data)
+    
+    write.table(cost_data, file = paste0(filename, "_cost_data.csv"), row.names = FALSE)
+    
+    ggplot(cost_data, aes(x=cl, y=cost))+
+      geom_line()+
+      geom_point(color="blue")+
+      theme_bw()+
+      theme(panel.background = element_rect(fill = "white"))
+    
+    ggsave(filename = paste0(filename, "_cost_plot.png"), )
+    
+  }
+  
+  
+}
+
+
+barPlotData <- function(tb, cluster, unscaled_data = NULL){
+  sub_tb <- dplyr::filter(tb, kmeans == cluster)
+  
+  if(!is.null(unscaled_data)){
+    unscaled_data[is.na(unscaled_data)] <- 0
+    sub_tb <- unscaled_data[rownames(sub_tb),]
+  }
+    
+  output <- data.frame(
+    groups = c("gene_FC", "mir_FC", "dnam_quot"),
+    mean = c(mean(sub_tb$gene_FC), mean(sub_tb$mir_FC), mean(sub_tb$dnam_quot)),
+    sd = c(sd(sub_tb$gene_FC), sd(sub_tb$mir_FC), sd(sub_tb$dnam_quot))
+  )
+  
+  output$groups <- factor(output$groups, levels = output$groups)
+  return(output)
 }

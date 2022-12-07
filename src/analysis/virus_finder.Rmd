@@ -1,0 +1,63 @@
+---
+title: "Virus finder"
+date: "`r format(Sys.time(), '%d %b, %Y')`"
+output:
+  html_document:
+    css: style.css
+---
+
+# Description
+Using ctat-vif software, detection of viral RNA from trancriptome data was performed.
+More details on look on ctat-vif-notes_pipeline_v2.txt
+
+
+# Libraries
+```{r Libraries, message=FALSE}
+library(dplyr)
+library(rprojroot)
+
+# Leads to the project directory
+project_dir <- find_rstudio_root_file()
+```
+
+# Loading data
+Files of this format were selected KBD2.VirusDetect.virus_read_counts_summary.tsv from multiple other outputs of the ctat-vif pipeline
+```{r}
+# Pulling mRNA RNAseq samples
+sample_list <- readxl::read_xlsx(file.path(project_dir, "data/input/samples.xlsx")) %>%
+  filter(mRNA == 1) %>%
+  pull(ID)
+
+```
+
+
+```{r}
+samples_viral_list <- list()
+
+hpv_count <- vector()
+
+for(s in sample_list){
+  
+  table <- read.csv(paste0(project_dir,"/data/raw/ctat_virusfinder/",s,".VirusDetect.virus_read_counts_summary.tsv"), header = TRUE, sep = "\t")
+  samples_viral_list <- append(samples_viral_list, list(table))
+  
+  if(is.element("HPV16",table$virus)){
+    hpv_count <- append(hpv_count, filter(table, virus == "HPV16") %>% pull(mapped))
+  }
+  else{
+    hpv_count <- append(hpv_count, 0)
+  }
+  
+}
+names(samples_viral_list) <- sample_list
+samples_viral_list
+
+viral_df <- data.frame(sample=sample_list, hpv_count=hpv_count)
+```
+
+
+
+# Session Info
+```{r Session info}
+sessionInfo()
+```

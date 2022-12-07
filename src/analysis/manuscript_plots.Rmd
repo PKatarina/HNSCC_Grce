@@ -19,6 +19,7 @@ library("pheatmap")
 library("RColorBrewer")
 library(dplyr)
 library(gprofiler2)
+library(plyranges)
 library(rprojroot)
 
 # Leads to the project directory
@@ -358,6 +359,169 @@ ggplot(mir_freq, aes(Freq))+
 
 ```{r}
 
+```
+
+
+# DM CpGs
+## Loading data
+```{r}
+dnam_res_sites <- readRDS(file.path(project_dir,"data/processed/dnam_res_sites.rds")) %>%
+  as.data.frame()
+
+rnb_set <- readRDS(file = file.path(project_dir, "data/processed/rnb_set.rds"))
+```
+
+
+```{r}
+dnam_res_sites_annotated <- 
+  annotation(rnb_set)[(dnam_res_sites$diffmeth.p.adj.fdr < 0.05),] %>%
+  dplyr::select(Chromosome, Start, End) %>%
+  as_granges(seqnames = Chromosome, start = Start, end = End, keep_mcols = TRUE)
+
+mcols(dnam_res_sites_annotated)$mean.quot.log2 <-
+  dnam_res_sites[(dnam_res_sites$diffmeth.p.adj.fdr< 0.05),]$mean.quot.log2
+
+mcols(dnam_res_sites_annotated)$diffmeth.p.adj.fdr <-
+  dnam_res_sites[(dnam_res_sites$diffmeth.p.adj.fdr < 0.05),]$diffmeth.p.adj.fdr
+
+seqlevelsStyle(dnam_res_sites_annotated) <- "NCBI"
+```
+
+
+Selecting transposable elements
+This paper is source for gtf file:
+https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4757950/ 
+And the download  link:
+https://labshare.cshl.edu/shares/mhammelllab/www-data/TEtranscripts/TE_GTF/GRCh37_Ensembl_rmsk_TE.gtf.gz 
+```{r}
+TE <- read_gff(file = file.path(project_dir, "data/input/TE/GRCh37_rmsk_TE.gtf"))
+
+
+TE_sub <- subsetByOverlaps(TE, dnam_res_sites_annotated)
+rm(TE)
+
+
+dnam_sites_TE <- join_overlap_left(dnam_res_sites_annotated, TE_sub) %>% 
+  unique()
+
+rm(dnam_res_sites_annotated)
+rm(TE_sub)
+```
+
+## TE Bar plots
+Only TE. from the sites
+```{r}
+dnam_te <- as.data.frame(mcols(dnam_sites_TE)) %>%
+  mutate(status = ifelse(mean.quot.log2 > 0, "hypermethylated", "hypomethylated"))
+
+heat_colors <- colorRampPalette(brewer.pal(n=9, name="RdBu"))(7)
+
+ggplot(dnam_te, aes(x=class_id, fill = status)) +
+  geom_bar(position=position_dodge()) +
+  scale_y_log10() +
+  scale_fill_manual(values=c(heat_colors[c(1,6)]))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  theme(#panel.grid = element_blank(),
+         # panel.background = element_rect(fill = brewer.pal(3,"Greys")[1]),
+     panel.background = element_rect(fill = "white"),
+         panel.border = element_rect(fill = "transparent"),
+         panel.grid = element_line(color = brewer.pal(5,"Greys")[1]),
+         legend.key=element_blank(),
+         axis.title=element_text(size=10),
+         legend.text=element_text(size=10),
+         legend.title=element_text(size=10))
+  
+
+
+```
+Adding genes and promoter information 
+```{r}
+rnb_genes <- annotation(rnb_set, type = "genes") %>%
+  dplyr::select(Chromosome, Start, End, symbol) %>%
+  as_granges(seqnames = Chromosome, start= Start, end = End, keep_mcols = TRUE) %>%
+  unique()
+
+seqlevelsStyle(rnb_genes) <- "NCBI"
+
+dnam_sites_TE <- join_overlap_left(dnam_sites_TE, rnb_genes) %>% unique()
+
+rm(rnb_genes)
+
+rnb_promoters <- annotation(rnb_set, type = "promoters") %>%
+  dplyr::select(Chromosome, Start, End, promoter_symbol = "symbol") %>%
+  as_granges(seqnames = Chromosome, start= Start, end = End, keep_mcols = TRUE) %>%
+  unique()
+
+seqlevelsStyle(rnb_promoters) <- "NCBI"
+
+dnam_sites_TE <- join_overlap_left(dnam_sites_TE, rnb_promoters) %>% unique()
+
+rm(rnb_promoters)
+
+```
+
+
+```{r}
+mcols(dnam_sites_TE) %>%
+  as.data.frame() %>%
+  mutate(isTE = ifelse(is.na(class_id), 0,1 ),
+         isGene = ifelse(is.na(symbol),0,1)) %>%
+  select(isTE, isGene) %>%
+  table()
+```
+
+```{r, eval=FALSE}
+
+# When dplyr fails for steps in
+for( i in 1:length(dnam_sites_TE)){
+  if(!is.na(mcols(dnam_sites_TE)$class_id[i])){ 
+    cpg_annot <- append(cpg_annot, mcols(dnam_sites_TE)$class_id[i])}
+  
+  else if (!is.na(mcols(dnam_sites_TE)$symbol[i])){
+    cpg_annot <- append(cpg_annot, "gene_body")
+  }
+  else if (!is.na(mcols(dnam_sites_TE)$promoter_symbol[i])){
+    cpg_annot <- append(cpg_annot, "promoter_region")
+  }
+  else{
+    cpg_annot <- append(cpg_annot, NA)
+  }
+
+ if(i %% 10000 == 0)
+  print(i)
+}
+
+saveRDS(cpg_annot, file= file.path(project_dir, "data/processed/cpg_annot_vec.rds"))
+```
+
+
+```{r}
+cpg_annot <- readRDS(file= file.path(project_dir, "data/processed/cpg_annot_vec.rds"))
+
+dnam_sites_TE$cpg_annotations <- cpg_annot
+```
+
+
+```{r}
+dnam_te <- as.data.frame(mcols(dnam_sites_TE)) %>%
+  mutate(status = ifelse(mean.quot.log2 > 0, "hypermethylated", "hypomethylated"))
+
+ggplot(dnam_te, aes(x=cpg_annotations, fill = status)) +
+  geom_bar(position=position_dodge()) +
+  scale_y_log10() +
+  scale_fill_manual(values=c(heat_colors[c(1,6)]))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  theme(#panel.grid = element_blank(),
+         # panel.background = element_rect(fill = brewer.pal(3,"Greys")[1]),
+     panel.background = element_rect(fill = "white"),
+         panel.border = element_rect(fill = "transparent"),
+         panel.grid = element_line(color = brewer.pal(5,"Greys")[1]),
+         legend.key=element_blank(),
+         axis.title=element_text(size=10),
+         legend.text=element_text(size=10),
+         legend.title=element_text(size=10))
+
+ggsave(filename = file.path(project_dir, "data/output/figures/DM_sites_TE.png"))
 ```
 
 

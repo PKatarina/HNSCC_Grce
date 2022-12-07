@@ -46,9 +46,6 @@ library(RnBeads.hg19)
 library(plyranges)
 library(rprojroot)
 
-# source(file = file.path(getwd(), "scripts", "idMap.R"))
-# source(file = file.path(getwd(), "scripts", "triangleHeatMap.R"))
-
 # Leads to the project directory
 project_dir <- find_rstudio_root_file()
 
@@ -1098,6 +1095,7 @@ saveRDS(mir_res_HPV, file.path(processed_dir,"mir_res_HPV.rds"))
 
 #DNAm
 saveRDS(dnam_res_cgi, file.path(processed_dir,"dnam_res_cgi.rds"))
+saveRDS(dnam_res_sites, file.path(processed_dir,"dnam_res_sites.rds"))
 saveRDS(rnb_set,file.path(processed_dir,"rnb_set.rds"))
 ```
 

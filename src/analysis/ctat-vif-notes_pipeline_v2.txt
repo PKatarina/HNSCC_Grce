@@ -1,0 +1,69 @@
+Found a library that contains all the other tools inside it. 
+The link to github
+https://github.com/broadinstitute/CTAT-VirusIntegrationFinder/wiki/VIF_InstallationInstructions 
+
+1) Prepares pair end samples in the working directory 
+~/HNSCC/RNASeq/
+|--KBD2/
+  |--KBD2_R1.fastq
+  |--KBD2_R2.fastq
+  ....
+  
+
+2) Download singularity image (I have stored it in a dir with all images)
+>singularity pull ctat_virusfinder docker://rinityctat/ctat_vif:1.5.0-predev
+
+3) Download genome lib.
+There is some kind of compatitbility with the star aligner. Checked in the image the version and it corresponded to the latest STAR version (the topmost) and selected the plug-n-play. I assume this contains all indexes required for the tool to run.
+https://data.broadinstitute.org/Trinity/CTAT_RESOURCE_LIB/__genome_libs_StarFv1.10/
+https://data.broadinstitute.org/Trinity/CTAT_RESOURCE_LIB/__genome_libs_StarFv1.10/GRCh37_gencode_v19_CTAT_lib_Mar012021.plug-n-play.tar.gz
+(There is an md5sum file but I have no idea what this is for so i just ignored it. Seems a pretty smart decision atm)
+I have unziped it with:
+>tar xvzf GRCh37_gencode_v19_CTAT_lib_Mar012021.plug-n-play.tar.gz
+and just removed the extra dir to have the ctat_genome_lib_build_dir/ directly in the RNAseq dir
+
+
+4) Prepare VIF dir with viral genome and index.
+There is human viral genomes fasta file available with details on how they generated it.
+Instructions:
+https://github.com/broadinstitute/CTAT-VirusIntegrationFinder/wiki/Human-Virus-Database-Prep
+FASTA:
+https://data.broadinstitute.org/Trinity/CTAT_RESOURCE_LIB/VIRUS_INSERTION_FINDING_LIB_SUPPLEMENT/virus_db.nr.fasta 
+Downloaded the fasta file and stored in the RNAseq/ dir
+To use the fasta file for creating indexes a python script was used that was provided in the singularity image. The instructions do not clearly explain how to get to the script but with some digging i found that it is possible to get to the "bin" in the singularity image. Which makes sense, since I am in the console of the OS from the singularity. 
+This is the path for libs:
+>/usr/local/bin/
+
+I have generated the viral indexes wiht the main script for the first sample. (It was pretty fast) so I will just remove it for other samples.
+>/usr/local/bin/prep_genome_lib/ctat-vif-lib-integration.py \
+    --virus_db virus_db.nr.fasta \
+    --genome_lib_dir ctat_genome_lib_build_dir \
+    --CPU 4
+
+
+And the full first script
+>#!/bin/bash
+
+/usr/local/bin/prep_genome_lib/ctat-vif-lib-integration.py \
+    --virus_db virus_db.nr.fasta \
+    --genome_lib_dir ctat_genome_lib_build_dir \
+    --CPU 4
+
+ctat-vif --left /KBD2/KBD2_R1.fastq \
+        --right /KBD2/KBD2_R2.fastq \
+        --sample_id KBD2 \
+        -O KBD2_ctat \
+        --genome_lib_dir ctat_genome_lib_build_dir
+        
+        
+And the job submission script:
+>#!/bin/bash
+
+#$ -N virus_finder
+#$ -cwd
+#$ -m bae
+
+
+singularity run /home/kprskalo/images/ctat_virusfinder "/home/kprskalo/HNSCC/RNAseq/ctat.sh"
+
+- I should probably modifiy it to allocate CPUs. I think it is using 4 CPUs atm.

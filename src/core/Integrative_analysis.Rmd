@@ -247,7 +247,7 @@ k_tb <- data.frame(row.names = reg_df$gene,
 
 
 ```{r}
-kmeansHeatmap(k_tb, clusters= 11, nstart = 100, GSEA = TRUE,
+kmeansHeatmap(k_tb, clusters= 8:20, nstart = 100, GSEA = TRUE,
               scaled = "scaled",
               directory = file.path(project_dir, "data/output/kmeans_clusters/"))
 ```
