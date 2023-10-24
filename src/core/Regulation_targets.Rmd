@@ -90,10 +90,12 @@ targ_mir_mRNA <-
                    keys = "validated",
                    columns = c("mature_mirna_id", 
                                "target_ensembl",
-                               "target_symbol"))
+                               "target_symbol",
+                               "support_type"))
 
 # Removing duplicates and removing type column (redundant)
-targ_mir_mRNA <- unique(dplyr::select(targ_mir_mRNA, -type))
+# targ_mir_mRNA <- unique(dplyr::select(targ_mir_mRNA, -type))
+targ_mir_mRNA <- unique(targ_mir_mRNA)
 
 rm(multi_db)
 
@@ -102,13 +104,13 @@ head(targ_mir_mRNA)
 
 
 ```{r, eval=FALSE}
-saveRDS(targ_mir_mRNA, "outputs/RDS/targ_mir_mRNA.rds")
+saveRDS(targ_mir_mRNA, file.path(project_dir,"data/processed/targ_mir_mRNA.rds"))
 
 ```
 
 
 ```{r}
-targ_mir_mRNA <- readRDS( "outputs/RDS/targ_mir_mRNA.rds")
+targ_mir_mRNA <- readRDS(file.path(project_dir,"data/processed/targ_mir_mRNA.rds"))
 ```
 
 
@@ -299,7 +301,7 @@ GSEA GSEA analysis on genes that are under methylation regulation. There many te
 ```{r, all DEGs}
 # targ_dnam_mRNA <- readRDS("outputs/RDS/targ_dnam_mRNA.rds")
 # Using only part of sources
-GSEA_SOURCES <- c("GO:BP","CORUM","KEGG","REAC","WP","MIRNA", "TF")
+# GSEA_SOURCES <- c("GO:BP","CORUM","KEGG","REAC","WP","MIRNA", "TF")
 
 query <- mcols(targ_dnam_mRNA) %>%
            as.data.frame() %>%
@@ -313,6 +315,7 @@ gost_res <-
        organism= "hsapiens",
        exclude_iea=TRUE,
        domain_scope="annotated",
+      # custom_bg = rownames(mRNA_res),
        ordered_query=F,
       #custom_bg = rownames(DE_mRNA),
        sources=GSEA_SOURCES)
@@ -321,8 +324,7 @@ gost_res <-
 gost_res$result$query <- "DEGs with DM promoters"
 
 gostplot(gost_res, capped = FALSE)
-# writexl::write_xlsx(gost_res$result, 
-# path ="outputs/GSEA_on_DEGs_with_DM_promoters.xlsx")
+# writexl::write_xlsx(gost_res$result,path =file.path(project_dir, "data/output/tables/GSEA_on_DEGs_with_DM_promoters.xlsx"))
 ```
 
 ```{r}

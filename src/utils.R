@@ -6,6 +6,8 @@ library(RColorBrewer)
 library(pheatmap)
 library(gprofiler2)
 
+GSEA_SOURCES <- c("GO:BP","KEGG","REAC", "MIRNA", "TF")
+
 
 idMap <- function(ensembl.id, genes_file){
   # @description: Mapping from ENSEMBL id to hgnc with GRanges object provided
@@ -39,7 +41,10 @@ integrateOmicsData <- function(mrna_res_obj, mir_res_obj, dnam_res_obj, mir_targ
                   mir_padj = "padj")
   
   # Transformin dnam data to df and renaming columns
-  dnam_res_obj = unique(dnam_res_obj) %>%
+
+  names(dnam_res_obj) <-  1:length(dnam_res_obj)
+  # dnam_res_obj = unique(dnam_res_obj) %>%
+  dnam_res_obj <- dnam_res_obj %>%
     as.data.frame() %>%
     dplyr::mutate(dnam_condensed_ranges = stringr::str_c(seqnames,":",start,"-",end, sep = "")) %>%
     dplyr::select(gene = "ensembl",
@@ -256,7 +261,7 @@ kmeansHeatmap <- function(tb, ann_tb=FALSE, clusters, nstart, GSEA=FALSE, scaled
     
     # nstart ensures stability of results, otherwise you get a different kmeans
     # every time
-    k <- kmeans(tb, centers = c, nstart = nstart)
+    k <- kmeans(tb, centers = c, nstart = nstart, iter.max=10)
     
     
     # reorder rows by clustering

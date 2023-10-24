@@ -305,6 +305,7 @@ publish_gostplot(gostplot(gost_mRNA ,capped = F, interactive = F),
 publish_gostplot(gostplot(gost_mRNA ,capped = F, interactive = F),
                  highlight_terms = GSEA_terms_to_highlight,
                  filename = file.path(project_dir, "data/output/figures/gost_plot_mRNA_highlighted.png"))
+writexl::write_xlsx(gost_mRNA$result, file.path(project_dir, "data/output/tables/GSEA_on_DEGs.xlsx"))
 ```
 
 
@@ -376,6 +377,10 @@ mRNA_res_HPV$symbol <- idMap(mRNA_res_HPV$row, genes_dir)
 head(mRNA_res_HPV)
 
 ```
+```{r}
+write.csv(mRNA_res_HPV, file = file.path(project_dir, "data/processed/mRNA_res_HPV.csv"))
+```
+
 
 **GSEA on HPV effect**  
 Gene set analysis on HPV related DE mRNA. Showing also non significant results.

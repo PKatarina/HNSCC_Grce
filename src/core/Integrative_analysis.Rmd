@@ -41,26 +41,24 @@ genes_dir <- file.path(project_dir, "data/input/genes.hg19.ensembl.rds")
 ```
 
 
-# Loading data
+  # Loading data
 ```{r Libraries, message=FALSE}
-dir_dest1 <- "/home/katarina/MyProjects/HNSCC/01-Exploratory_analysis_and_differential_expression"
-dir_dest2 <- "/home/katarina/MyProjects/HNSCC/02-Regulation_targets"
 
 ## 01
 # mRNA
-mRNA_res <- readRDS(file.path(dir_dest1,"outputs/RDS/mRNA_res.rds"))
+mRNA_res <- readRDS(file.path(project_dir, "data/processed/mRNA_res.rds"))
 # miR
-mir_res <- readRDS(file.path(dir_dest1,"outputs/RDS/mir_res.rds"))
+mir_res <- readRDS(file.path(project_dir,"data/processed/mir_res.rds"))
 # dnam
-dnam_res_cgi <- readRDS(file.path(dir_dest1,"outputs/RDS/dnam_res_cgi.rds"))
+dnam_res_cgi <- readRDS(file.path(project_dir,"data/processed/dnam_res_cgi.rds"))
 
 
 ## 02
 # miR-mRNA
-targ_mir_mRNA <- readRDS(file.path(dir_dest2,"outputs/RDS/targ_mir_mRNA.rds"))
-cor_mir <- readRDS(file.path(dir_dest2,"outputs/RDS/cor_mir.rds"))
+targ_mir_mRNA <- readRDS(file.path(project_dir,"data/processed/targ_mir_mRNA.rds"))
+cor_mir <- readRDS(file.path(project_dir,"data/processed/cor_mir.rds"))
 # dnam-mRNA
-targ_dnam_mRNA <- readRDS(file.path(dir_dest2,"outputs/RDS/targ_dnam_mRNA.rds"))
+targ_dnam_mRNA <- readRDS(file.path(project_dir,"data/processed/targ_dnam_mRNA.rds"))
 ```
 
 
@@ -85,18 +83,24 @@ simple_tb <-
 table(simple_tb [,c("mir","dnam")])
 
 
-png(file.path(project_dir,"data/output/figures/venn.png"), width = 1000, height = 700)
+png(file.path(project_dir,"data/output/figures/venn.png"), width = 1500, height = 1000)
 venn::venn(x =list(simple_tb[simple_tb$dnam ==1,"genes"],
              simple_tb[simple_tb$mir ==1,"genes"]), 
-     zcolor = c("#ffdd2f","#ff4d2f"),
+     # zcolor = c("#ffdd2f","#ff4d2f"),
+     zcolor = brewer.pal(8, "Paired")[c(4,8)],
      snames = c("DNA methylated","microRNA"),
-     opacity = 0.5,
-     plotsize = 100,
+     opacity = 0.6,
+     sncs = 4,
+     plotsize = 200,
      box = FALSE,
-     ilcs = 2,
-     file= file.path(project_dir,"data/output/figures/venn.png"))
+     ilcs = 4,
+     borders = FALSE,
+     lty = 1,
+     lwd = 5,
+     col = "white",
+     file= file.path(project_dir,"data/output/figures/venn.pdf"))
 dev.off()
-#save.image("outputs/Venn.png")
+# save.image("outputs/Venn.pdf")
 
 ```
 
@@ -148,6 +152,8 @@ for(q in names(query_ls)){
                                 dplyr::select(source) %>%
                                 table())
   
+  y_max <- ifelse(max(gsea_bar_data$Freq) > 200, 480, 200)
+  
   ggplot(data = gsea_bar_data, aes(x = source, y = Freq, fill = source))+
     geom_bar(width=0.6, stat = "identity") + 
     theme_bw()+
@@ -155,7 +161,7 @@ for(q in names(query_ls)){
           text = element_text(size = 12),
           legend.position = "none") + 
     scale_fill_manual(values = gsea_bar_cols)+
-    ylim(0,480)+
+    ylim(0, y_max)+
     geom_text(aes(label = Freq), vjust = -0.3)+
     ylab("Number of terms")+
     xlab("")
@@ -247,9 +253,16 @@ k_tb <- data.frame(row.names = reg_df$gene,
 
 
 ```{r}
-kmeansHeatmap(k_tb, clusters= 8:20, nstart = 100, GSEA = TRUE,
+kmeansHeatmap(k_tb, clusters= 12:20, nstart = 100, GSEA = TRUE,
               scaled = "scaled",
-              directory = file.path(project_dir, "data/output/kmeans_clusters/"))
+              directory = file.path(project_dir, "data/output/kmeans_clusters/")
+              )
+```
+```{r}
+k_tb <- readRDS( file.path(project_dir, "data/output/kmeans_clusters/20231024_0947__11clusters_100nstart_scaled.rds"))
+reg_df$kmeans <- k_tb[reg_df$gene,]$kmeans
+
+writexl::write_xlsx(reg_df, path = file.path(project_dir, "data/output/tables/integrated_table_per_GENE_clusters.xlsx"))
 ```
 
 
@@ -283,6 +296,88 @@ FC_box <- data.frame(label = c(rep("gene", length(k_tb$gene_FC)),
   filter(!is.na(value))
 
 boxplot(value ~ label, data=FC_box)
+
+```
+
+
+
+## **SOM**
+22.07.
+Loading data
+```{r}
+reg_df  <- readRDS(file.path(project_dir, "data/processed/integrated_table_per_GENE.rds"))
+```
+
+
+```{r}
+# Selecting relevant columns
+som_df <- data.frame(row.names = reg_df$gene,
+                   dplyr::select(reg_df,
+                                 gene_FC,
+                                 mir_FC,
+                                 dnam_quot))
+
+# Scaling
+som_df <- som_df %>%
+  mutate(gene_FC = scale(gene_FC),
+         mir_FC = scale (mir_FC),
+         dnam_quot = scale(dnam_quot)) %>%
+  as.matrix()
+
+# Defining a grid size and preparing a gird before training
+n = 4
+# grid_size_vec <-  c(n, n)
+grid_size <- somgrid(xdim = n, ydim = n, topo = "rectangular")
+
+# TRAIning som model
+som_model <- som(som_df, grid = grid_size,  rlen = 100)
+
+
+plot(som_model, type = "mapping", labels = rownames(data))
+plot(som_model, type = "codes", labels = rownames(data))
+plot(som_model, type = "changes", labels = rownames(data))
+plot(som_model, type = "counts", labels = rownames(data))
+plot(som_model, type = "dist.neighbours", labels = rownames(data))
+# plot(som_model, type = "property", labels = rownames(data))
+plot(som_model, type = "quality", labels = rownames(data))
+
+
+
+# Performing GSEA on data
+clusters <- som_model$unit.classif
+genes <- rownames(som_model$data[[1]])
+# Create an empty list to store the genes for each cluster
+query_ls <- vector("list", max(clusters))
+
+# Iterate through the genes and assign them to their respective clusters in the list
+for (i in seq_along(genes)) {
+  cluster_num <- clusters[i]
+  query_ls[[cluster_num]] <- c(query_ls[[cluster_num]], genes[i])
+}
+
+gost_obj <- gost(query = query_ls,
+               organism= "hsapiens",
+               exclude_iea=TRUE,
+               domain_scope="custom",
+               custom_bg = rownames(mRNA_res),
+               # custom_bg = reg_df$gene,
+               ordered_query=F,
+               sources=GSEA_SOURCES)
+
+View(gost_obj$result)
+```
+
+
+```{r}
+temp <-  
+  reg_df %>%
+  filter(is.element(gene, query_ls[[6]])) %>%
+  select(gene, gene_FC, mir_FC, dnam_quot) %>%
+  pivot_longer(cols = c(gene_FC, mir_FC, dnam_quot))
+
+ggplot(data = temp, aes(y = value, x = name)) +
+  geom_boxplot()
+
 
 ```
 

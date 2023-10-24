@@ -21,6 +21,8 @@ library(dplyr)
 library(gprofiler2)
 library(plyranges)
 library(rprojroot)
+library(RnBeads)
+library(tidyr)
 
 # Leads to the project directory
 project_dir <- find_rstudio_root_file()
@@ -28,6 +30,27 @@ project_dir <- find_rstudio_root_file()
 source(file = file.path(project_dir,"src", "utils.R"))
 
 genes_dir <- file.path(project_dir, "data","input", "genes.hg19.ensembl.rds")
+```
+
+Helpers
+```{r}
+calculate_shared_percentage <- function(vector1, vector2) {
+  if (length(vector1) == 0 || length(vector2) == 0) {
+    return(0)  # If either vector is empty, the percentage is 0.
+  }
+  
+  # Convert vectors to sets for efficient intersection calculation.
+  set1 <- unique(vector1)
+  set2 <- unique(vector2)
+  
+  # Calculate the intersection of the two sets.
+  intersection <- intersect(set1, set2)
+  
+  # Calculate the percentage of shared elements.
+  percentage <- length(intersection) / length(union(set1, set2)) * 100
+  
+  return(round(percentage,2))
+}
 ```
 
 # Load data
@@ -102,7 +125,7 @@ ggplot(mRNA_pcadata, aes(x = PC1, y = PC2, color = Tissue, shape = HPV, fill = S
 
 Saving to file
 ```{r, eval=FALSE}
-ggsave(filename = file.path(project_dir, "data/output/figures/PCA_mRNA.png"))
+ggsave(height=10, width = 10, filename = file.path(project_dir, "data/output/figures/PCA_mRNA.pdf"))
 ```
 
 # miR distance
@@ -125,10 +148,10 @@ annot_col <- list(
   Hist = setNames(c(brewer.pal(8, "Reds")[7],  brewer.pal(8, "Blues")[7]),
                    c("cancer", "control")),
   # HPV colors
-  HPV = setNames( c("forestgreen","gold"), 
+  HPV = setNames( brewer.pal(8, "Paired")[c(3,4)], 
                   c("P","N")),
   # Tissue colors
-  Tissue = setNames(c(brewer.pal(8, "Dark2")[3], brewer.pal(8, "Dark2")[7]),
+  Tissue = setNames(brewer.pal(8, "Paired")[c(7,8)],
                     c("OP","O")),
     # Smoking drinking colors
   Smoking_Drinking = setNames( c("forestgreen","gold", "white"), 
@@ -145,14 +168,14 @@ annot_data <- colData(mir_rld) %>%
   mutate(Hist = ifelse(Hist == "normal", "control", "cancer"))
 
 # additional annotations
-annot_data <-
-  left_join(tibble::rownames_to_column(annot_data), 
-            # first group of annot
-          dplyr::select(annot_full, Sample_ID, Smoking_Drinking, Age, Gradus),
-          # second group
-          # select(annot_full, Sample_ID, Stage, Smoking_Drinking, Gradus),
-          by = c("rowname" = "Sample_ID")) %>%
-  tibble::column_to_rownames("rowname")
+# annot_data <-
+#   left_join(tibble::rownames_to_column(annot_data), 
+#             # first group of annot
+#           dplyr::select(annot_full, Sample_ID, Smoking_Drinking, Age, Gradus),
+#           # second group
+#           # select(annot_full, Sample_ID, Stage, Smoking_Drinking, Gradus),
+#           by = c("rowname" = "Sample_ID")) %>%
+#   tibble::column_to_rownames("rowname")
 
 
 pheatmap(sampleDist_mir,
@@ -166,7 +189,7 @@ pheatmap(sampleDist_mir,
          #annotation_row = annot_data,
          annotation_col = annot_data,
          annotation_colors = annot_col,
-         show_colnames = TRUE,
+         show_colnames = FALSE,
          show_rownames = FALSE,
          annotation_names_col = FALSE)
 ```
@@ -184,13 +207,16 @@ pheatmap(sampleDist_mir,
          #annotation_row = annot_data,
          annotation_col = annot_data,
          annotation_colors = annot_col,
-         show_colnames = TRUE,
+         show_colnames = FALSE,
          show_rownames = FALSE,
          annotation_names_col = FALSE,
-         #fontsize = 20,
-         #width = 10,
-         #cellwidth = 25,
-         filename = file.path(project_dir, "data/output/figures/extra_annot_sampleDistance_miR.png"))
+         fontsize = 30,
+         width = 15,
+         height = 15,
+         cellwidth = 40,
+         cellheight = 40,
+         # filename = file.path(project_dir, "data/output/figures/extra_annot_sampleDistance_miR.png"))
+         filename = file.path(project_dir, "data/output/figures/mir_distance_heatmap.pdf"))
 ```
 
 
@@ -237,15 +263,15 @@ rownames(annot_data) <- pheno(rnb_set)$Sample_ID
 
 
 # additional annotations
-annot_data <-
-  left_join(tibble::rownames_to_column(annot_data), 
-            # first group of annot
-          dplyr::select(annot_full, Sample_ID, Smoking_Drinking, Age, Gradus) %>%
-          # second group
-          # select(annot_full, Sample_ID, Stage, Smoking_Drinking, Gradus) %>%
-            mutate(Sample_ID = tolower(Sample_ID)),
-          by = c("rowname" = "Sample_ID")) %>%
-  tibble::column_to_rownames("rowname")
+# annot_data <-
+#   left_join(tibble::rownames_to_column(annot_data), 
+#             # first group of annot
+#           dplyr::select(annot_full, Sample_ID, Smoking_Drinking, Age, Gradus) %>%
+#           # second group
+#           # select(annot_full, Sample_ID, Stage, Smoking_Drinking, Gradus) %>%
+#             mutate(Sample_ID = tolower(Sample_ID)),
+#           by = c("rowname" = "Sample_ID")) %>%
+#   tibble::column_to_rownames("rowname")
 
 pheatmap(sampleDist_dnam,
          # clustering_distance_rows = sampleDist_dnam,
@@ -256,7 +282,7 @@ pheatmap(sampleDist_dnam,
          #annotation_row = annot_data,
          annotation_col = annot_data,
          annotation_colors = annot_col,
-         show_colnames = TRUE,
+         show_colnames = FALSE,
          show_rownames = FALSE,
          annotation_names_col = FALSE)
 
@@ -273,13 +299,16 @@ pheatmap(sampleDist_dnam,
          #annotation_row = annot_data,
          annotation_col = annot_data,
          annotation_colors = annot_col,
-         show_colnames = TRUE,
+         show_colnames = FALSE,
          show_rownames = FALSE,
          annotation_names_col = FALSE,
-         #fontsize = 20,
-         #width = 10,
-         #cellwidth = 25,
-         filename =file.path(project_dir, "data/output/figures/extra_annot_sampleDistance_dnam.png"))
+         fontsize = 30,
+         width = 16,
+         height = 15,
+         cellwidth = 40,
+         cellheight = 40,
+         # filename =file.path(project_dir, "data/output/figures/extra_annot_sampleDistance_dnam.png"))
+         filename = file.path(project_dir, "data/output/figures/dnam_distance_heatmap.pdf"))
 ```
 
 
@@ -504,11 +533,30 @@ dnam_sites_TE$cpg_annotations <- cpg_annot
 
 ```{r}
 dnam_te <- as.data.frame(mcols(dnam_sites_TE)) %>%
-  mutate(status = ifelse(mean.quot.log2 > 0, "hypermethylated", "hypomethylated"))
+  mutate(status = ifelse(mean.quot.log2 > 0, "hypermethylated", "hypomethylated")) %>%
+  # Selecting only annotations that I can interpret
+  filter(is.element(cpg_annotations, c("DNA", "gene_body", "LINE", "LTR",
+                                       # "Other","RC", "RNA",
+                                        "promoter_region", "Satellite", "SINE"))) %>%
+  dplyr::mutate(cpg_annotations = ifelse(cpg_annotations=="promoter_region", "Promoter region", 
+                                         ifelse(cpg_annotations=="gene_body", "Gene body", cpg_annotations)))
+  
+
+chi_tbl <- dnam_te %>% dplyr::select(cpg_annotations, status) %>% table()
+chi <- chisq.test(chi_tbl)
+# OVo je za DM CGI-jeve na temelju tablice
+chisq.test(x=c(5457, 6557))
+
+dnam_te$cpg_annotations <- factor(dnam_te$cpg_annotations, levels = c("Gene body", "Promoter region", "LINE", "SINE", "LTR", "DNA", "Satellite")) 
+
+scientific_10 <- function(x) {
+  parse(text=gsub("e", " %*% 10^", scales::scientific_format()(x)))
+}
 
 ggplot(dnam_te, aes(x=cpg_annotations, fill = status)) +
-  geom_bar(position=position_dodge()) +
-  scale_y_log10() +
+  geom_bar(position=position_dodge(), color = "black", size = 0.5) +
+  # scale_y_log10() +
+  scale_y_continuous(trans = "log10", label=scientific_10) +
   scale_fill_manual(values=c(heat_colors[c(1,6)]))+
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
   theme(#panel.grid = element_blank(),
@@ -519,11 +567,223 @@ ggplot(dnam_te, aes(x=cpg_annotations, fill = status)) +
          legend.key=element_blank(),
          axis.title=element_text(size=10),
          legend.text=element_text(size=10),
-         legend.title=element_text(size=10))
+         legend.title=element_text(size=10)) +
+  labs(x = "", y = "", fill = "CpG status")
 
-ggsave(filename = file.path(project_dir, "data/output/figures/DM_sites_TE.png"))
+ggsave(width = 7, height = 5, filename = file.path(project_dir, "data/output/figures/DM_sites_TE.png"))
 ```
 
+
+# DE mRNA in HPV
+Treba ih poredati po abs FC
+```{r}
+mRNA_res_HPV <- read.csv(file = file.path(project_dir, "data/processed/mRNA_res_HPV.csv"))
+
+data_ <- mRNA_res_HPV %>%
+  arrange(desc(abs(log2FoldChange))) %>%
+  dplyr::select(-X)
+rownames(data_) <- c(1:length(data_$row))
+
+data_1 <- data_[c(1:16),]
+
+data_2 <- data_ %>%
+  filter(is.element(symbol, c("ZNF541", "PAX8", "TYMS", "ADCYAP1")))
+data_ <- rbind(data_1, data_2)
+
+data_ <- data_ %>%
+    # arrange(desc(log2FoldChange))
+  arrange(log2FoldChange)
+
+data_$symbol <- factor(data_$symbol, levels = data_$symbol)
+
+
+
+
+ggplot(data_, aes(#x = as.numeric(rownames(data_)),
+                  x = log2FoldChange,
+                  y= as.factor(symbol), 
+                  size = -log(padj),
+                  color = log2FoldChange)) +
+  geom_point() +
+  # scale_x_continuous(breaks = c(-5, -4, -3, -2,2, 4, 5)) +
+  # scale_color_gradient(low = "red", high = "darkblue") +
+  scale_color_gradientn(colours = brewer.pal(n=9, name="RdBu"))+
+  theme_bw() +
+  labs(y ="",
+       x = "Log2 Fold Change",
+       size = "-Log2 p-value",
+       color = "Log2 Fold Change")+
+  theme(axis.text.y = element_text(face="bold"))
+
+ggsave(height = 5, width = 5, file.path(project_dir, "data/output/figures/mRNA_HPV_top20_genes_dotplot.png"))
+
+  
+  
+```
+
+
+# miR in multiple clusters
+I double checked and this matches the kmeans clusters as per: 20221110_1148__11clusters_100nstart_scaled 
+```{r}
+reg_df <- readxl::read_xlsx(file.path(project_dir, "data/output/tables", "integrated_table_per_GENE_clusters.xlsx"))
+```
+
+
+```{r}
+message(paste(filter(reg_df, kmeans == 3 & !is.na(mir))$mir %>% unique() %>% length(), "-> number of mirs in cluster 3"))
+message(paste(filter(reg_df, kmeans == 9 & !is.na(mir))$mir %>% unique() %>% length(), "-> number of mirs in cluster 9"))
+
+# Overexpressed mirs
+is.element(unique(filter(reg_df, kmeans == 3)$mir), filter(reg_df, kmeans == 9)$mir) %>% table()
+message(paste(calculate_shared_percentage(unique(filter(reg_df, kmeans == 3)$mir),  filter(reg_df, kmeans == 9)$mir),"- percent of uniqe mirs that overlap"))
+message(paste(filter(reg_df, kmeans == 5 & !is.na(mir))$mir %>% unique() %>% length(), "-> number of mirs in cluster 5"))
+message(paste(filter(reg_df, kmeans == 7 & !is.na(mir))$mir %>% unique() %>% length(), "-> number of mirs in cluster 8"))
+# Underexpressed mirs
+is.element(unique(filter(reg_df, kmeans == 7)$mir), filter(reg_df, kmeans == 5)$mir) %>% table()
+message(paste(calculate_shared_percentage(unique(filter(reg_df, kmeans == 7)$mir),  filter(reg_df, kmeans == 5)$mir),"- percent of uniqe mirs that overlap"))
+
+
+filter(reg_df, kmeans == 3)$mir %>% table() %>% as.data.frame() %>% arrange(Freq)
+filter(reg_df, kmeans == 9)$mir %>% table() %>% as.data.frame() %>% arrange(Freq)
+```
+### E2F gene expressions
+```{r}
+e2f_ids <- data.frame(symbol = c("E2F1", "E2F2", "E2F3", "E2F4", "E2F5", "E2F6", "E2F7", "E2F8"),
+                      ensembl = c("ENSG00000101412", "ENSG00000007968", "ENSG00000112242", "ENSG00000205250", "ENSG00000133740", "ENSG00000169016", "ENSG00000165891", "ENSG00000129173"))
+
+# Preparing count data
+data_ <- counts(mRNA_dds, normalized = TRUE)[e2f_ids$ensembl,] %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "genes")
+# Pivoting to long format
+data_ <- pivot_longer(data_, cols = -genes, names_to = "samples", values_to = "counts")
+
+# grabing sample annotation from dds object
+data_ <-  data_ %>%
+    mutate(sample_type = colData(mRNA_dds)[data_$samples, ]$Hist) %>%
+  # adding symbol names
+  mutate(gene_symbols = e2f_ids[match(genes, e2f_ids$ensembl),"symbol"])
+
+```
+Ploting
+```{r}
+
+col_pca <- c(
+  # Dark red
+  brewer.pal(8, "Reds")[7],
+  brewer.pal(8, "Blues")[7]
+)
+
+ggplot(data_, aes(x = gene_symbols, y = counts, fill = sample_type)) +
+  geom_boxplot() + 
+  theme_bw() +
+  ylab("Normalized counts")+
+  xlab("") +
+  labs(fill = "Sample group") + 
+  theme(axis.title=element_text(size=18),
+         legend.text=element_text(size=18),
+         legend.title=element_text(size=18),
+        axis.text.x = element_text(size = 12))+
+  scale_fill_manual(values = col_pca)
+
+# ggsave(filename = file.path(project_dir, "data/output/figures/E2F_counts.png"),        height = 6, width = 9)
+
+```
+# Legend for sample plot
+### Samples
+```{r}
+# Outcome <- c("A", "B", "C", "D",'E')
+Data <- c("Available", "Not available")
+shots <- rep('Label',2)
+xc <-c(1:2)
+yc <-c(1:2)
+df <-data.frame(shots,Data,xc,yc)
+
+palette_color <- c("A"='chartreuse3', "B"='gainsboro', "C"='dodgerblue3', "D"='firebrick2', "E"='cornsilk4')
+
+ggplot(df, aes(x = xc, y = yc, fill = Data)) +
+  geom_point(shape=22, alpha=0, size = 5) +
+  # geom_blank() +
+  scale_fill_manual(values=c("white", "gray"), drop=FALSE) +
+  guides(fill = guide_legend(override.aes = list(alpha=1))) +
+  theme_classic() +
+  # theme(legend.position = c(0.5,0.5),
+  #       legend.text = element_text(size = 10),
+  #       legend.title = element_text(size = 10),
+  #       legend.key = element_rect( color = NA, size = 5))
+    theme(
+    legend.position = c(0.5, 0.5),
+    legend.text = element_text(size = 20),
+    legend.title = element_text(size = 20),
+    legend.key.size = unit(2, "lines")  # Adjust size here
+  )
+
+ggsave(height = 10, width = 10, filename = file.path(project_dir,"data/output/figures", "sample_table_legend_samples.pdf"))
+
+```
+### Location
+```{r}
+# Outcome <- c("A", "B", "C", "D",'E')
+Location <- c("O", "OP")
+shots <- rep('Label',2)
+xc <-c(1:2)
+yc <-c(1:2)
+df <-data.frame(shots,Location = Location,xc,yc)
+
+palette_color <- c("A"='chartreuse3', "B"='gainsboro', "C"='dodgerblue3', "D"='firebrick2', "E"='cornsilk4')
+
+ggplot(df, aes(x = xc, y = yc, fill = Location)) +
+  geom_point(shape=22, alpha=0, size = 5) +
+  # geom_blank() +
+  scale_fill_manual(values=brewer.pal(8, "Paired")[c(8,7)], drop=FALSE) +
+  guides(fill = guide_legend(override.aes = list(alpha=1))) +
+  theme_classic() +
+  # theme(legend.position = c(0.5,0.5),
+  #       legend.text = element_text(size = 10),
+  #       legend.title = element_text(size = 10),
+  #       legend.key = element_rect( color = NA, size = 5))
+    theme(
+    legend.position = c(0.5, 0.5),
+    legend.text = element_text(size = 20),
+    legend.title = element_text(size = 20),
+    legend.key.size = unit(2, "lines")  # Adjust size here
+  )
+
+ggsave(height = 10, width = 10, filename = file.path(project_dir,"data/output/figures", "sample_table_legend_location.pdf"))
+
+```
+
+### HPV
+```{r}
+# Outcome <- c("A", "B", "C", "D",'E')
+HPV <- c("N", "P")
+shots <- rep('Label',2)
+xc <-c(1:2)
+yc <-c(1:2)
+df <-data.frame(shots,HPV,xc,yc)
+
+palette_color <- c("A"='chartreuse3', "B"='gainsboro', "C"='dodgerblue3', "D"='firebrick2', "E"='cornsilk4')
+
+ggplot(df, aes(x = xc, y = yc, fill = HPV)) +
+  geom_point(shape=22, alpha=0, size = 5) +
+  # geom_blank() +
+  scale_fill_manual(values=brewer.pal(8, "Paired")[c(4,3)], drop=FALSE) +
+  guides(fill = guide_legend(override.aes = list(alpha=1))) +
+  theme_classic() +
+  # theme(legend.position = c(0.5,0.5),
+  #       legend.text = element_text(size = 10),
+  #       legend.title = element_text(size = 10),
+  #       legend.key = element_rect( color = NA, size = 5))
+    theme(
+    legend.position = c(0.5, 0.5),
+    legend.text = element_text(size = 20),
+    legend.title = element_text(size = 20),
+    legend.key.size = unit(2, "lines")  # Adjust size here
+  )
+
+ggsave(height = 10, width = 10, filename = file.path(project_dir,"data/output/figures", "sample_table_legend_HPV.pdf"))
+
+```
 
 # Session Info
 ```{r Session info}

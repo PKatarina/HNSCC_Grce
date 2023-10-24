@@ -74,6 +74,32 @@ to_export <- left_join(reg_df,
                          select(gene, kmeans))
 writexl::write_xlsx(to_export, file.path(project_dir, "data/output/tables/integrated_table_per_GENE_clusters.xlsx"))
 ```
+# Testing kmeans on different bgs
+```{r}
+k_tb <-readRDS(file = file.path(project_dir, "data/output/kmeans_clusters/20221205_1846__11clusters_100nstart_scaled.rds"))
+
+```
+
+
+```{r}
+  # Preparing list 
+  query <- list()
+  for (c in unique(k_tb$kmeans)) {
+    query[[c]] <- rownames(dplyr::filter(k_tb, kmeans == c))  
+  }
+  
+  print(paste0("GSEA on kmeans table with ", c, " clusters."))
+
+  gost_k <-gost(query = query,
+               organism= "hsapiens",
+               exclude_iea=TRUE,
+               domain_scope="custom",
+               # custom_bg = rownames(mRNA_res),
+               custom_bg = reg_df$gene,
+               ordered_query=F,
+               sources=GSEA_SOURCES)
+```
+
 
 
 # Session Info

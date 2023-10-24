@@ -28,6 +28,8 @@ sample_list <- readxl::read_xlsx(file.path(project_dir, "data/input/samples.xlsx
   filter(mRNA == 1) %>%
   pull(ID)
 
+mRNA_dds <- readRDS(file.path(project_dir, "data/processed/mRNA_dds.rds"))
+
 ```
 
 
@@ -55,6 +57,11 @@ samples_viral_list
 viral_df <- data.frame(sample=sample_list, hpv_count=hpv_count)
 ```
 
+Adding number of CDKN2A
+```{r}
+viral_df$CDKN2A <- as.vector(counts(mRNA_dds["ENSG00000147889"], normalized = TRUE))
+viral_df$CDKN1A <- as.vector(counts(mRNA_dds["ENSG00000124762"], normalized = TRUE))
+```
 
 
 # Session Info

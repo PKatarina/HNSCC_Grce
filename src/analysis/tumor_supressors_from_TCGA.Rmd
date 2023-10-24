@@ -32,7 +32,9 @@ tcga_HNSC_TS <- read.csv(file.path(project_dir,"data/input/HNSC_down_regulated_T
 
 mRNA_res <- readRDS(file.path(project_dir, "data/processed/mRNA_res.rds"))
 
- genes_dir <- file.path(project_dir, "data","input", "genes.hg19.ensembl.rds")
+genes_dir <- file.path(project_dir, "data","input", "genes.hg19.ensembl.rds")
+
+dnam_res_cgi <- readRDS(file.path(dir_dest, "dnam_res_cgi.rds"))
 ```
 
 
@@ -69,7 +71,7 @@ DR_TS <- filter(DE_mRNA, is.element(geneName,tcga_HNSC_TS$GeneName ) & log2FoldC
 
 # downregulated tumor supressor with hypermethylated tumor supressors
 DR_DM_TS <- 
-  plyranges::filter(dnam_res_cgi, is.element(ensembl, rownames(DR_TS)) & log.quot > 0)  %>%
+  plyranges::filter(dnam_res_cgi, is.element(ensembl, rownames(DR_TS)) & log.quot > 0 & padj < 0.01)  %>%
   as.data.frame()
 
 
