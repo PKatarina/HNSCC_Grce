@@ -66,4 +66,7 @@ And the job submission script:
 
 singularity run /home/kprskalo/images/ctat_virusfinder "/home/kprskalo/HNSCC/RNAseq/ctat.sh"
 
+Alternatively
+singularity run /home/kprskalo/images/ctat_virusfinder "ctat.sh"
+
 - I should probably modifiy it to allocate CPUs. I think it is using 4 CPUs atm.

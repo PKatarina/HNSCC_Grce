@@ -1,0 +1,160 @@
+---
+title: "Survival analysis"
+output: html_notebook
+---
+
+# Description
+Insert the descripiton of the notebook here.
+
+# Libraries
+```{r Libraries, message=FALSE}
+library(tidyverse)
+library(survival)
+library(ggfortify)
+
+project_dir <-"/home/katarina/MyProjects/HNSCC"
+
+```
+
+# Load data
+```{r}
+sample_surv <- read.csv(file.path(project_dir, "data/input/Sample_table_survival.tsv"), sep = "\t") %>%
+  filter(!(ID == ""))
+
+
+annot_col <- list(
+  # Tumor colors
+  Sample = setNames(c(brewer.pal(8, "Reds")[7],  brewer.pal(8, "Blues")[7]),
+                   c("cancer", "control")),
+  # HPV colors
+  HPV = setNames( brewer.pal(8, "Paired")[c(3,4)], 
+                  c("P","N")),
+  # Tissue colors
+  Tissue = setNames(brewer.pal(8, "Paired")[c(7,8)],
+                    c("OP","O")),
+    # Smoking drinking colors
+  Smoking_Drinking = setNames( c("forestgreen","gold", "white"), 
+                  c("0","1", "?")),
+  Age = brewer.pal(9, "Greys"),
+  Gradus = setNames(brewer.pal(9, "Reds")[c(1,3,5,7,9)],
+                    c("nema nalaza", "0", "1", "2", "3"))
+)
+```
+
+Kaplan mayer
+```{r}
+data_ <- sample_surv %>%
+  filter(is.element(OS, c(0,1)))
+
+surv_obj <- Surv(as.numeric(data_$FU.mjeseci), as.numeric(data_$OS))
+
+# Fit a survival model
+fit <- survfit(surv_obj ~ 1)
+
+# Create a data frame from the survival model
+surv_df <- data.frame(time = fit$time, 
+                      surv = fit$surv, 
+                      upper = fit$upper, 
+                      lower = fit$lower)
+
+# Plot the survival curve with ggplot2
+ggplot(surv_df, aes(x = time, y = surv)) +
+  geom_line() +
+  # geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.4) +
+  labs(x = "Time (months)", y = "Overall survival probability") +
+  theme_bw() +
+  coord_cartesian(xlim = c(0, 94), ylim = c(0, 1)) 
+
+```
+
+Survival HPV + vs HPV -
+```{r}
+data_ <- sample_surv %>%
+  filter(is.element(OS, c(0,1)))
+
+surv_obj <- Surv(as.numeric(data_$FU.mjeseci), as.numeric(data_$OS))
+
+# Fit a survival model
+fit_2 <- survfit(surv_obj ~ data_$HPV)
+p_ <- survdiff(surv_obj ~ data_$HPV)$pvalue
+
+col_pca <- c(
+  # Dark red
+  brewer.pal(8, "Reds")[7],
+  brewer.pal(8, "Blues")[7]
+)
+
+print(p_)
+autoplot(fit_2, conf.int = FALSE) +
+  theme_bw() +
+  labs(x = "Time (months)", y = "Overall survival probability") +
+  ggtitle(paste0("p-value = ", round(p_, 2))) +
+  # scale_color_discrete(labels = c("HPV neg", "HPV pos")) +
+  # scale_color_manual(values = c("0" = annot_col[["HPV"]]["N"], "1" = annot_col[["HPV"]]["P"]),
+scale_color_manual(values = c("0" = "#33A02C" , "1" = as.character(annot_col[["HPV"]]["P"])) ,
+                     labels = c("0" = "N", "1" = "P"),
+                     name = "HPV    ") +
+  coord_cartesian(xlim = c(0, 94), ylim = c(0, 1)) +
+    theme(
+        axis.title = element_text(size = 14),  # Increase axis label size
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 14)) 
+
+  
+ggsave(width = 5,height = 3, file.path(project_dir, "data/output/figures/survival_curves", "HPV.png"))
+
+# # Plot the survival curves with ggplot2
+# ggplot(surv_df, aes(x = time, y = surv, color = HPV)) +
+#   geom_line() +
+#   geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.4) +
+#   labs(x = "Time (months)", y = "Survival probability", color = "HPV status")
+
+```
+
+Survival Location OP vs O
+```{r}
+data_ <- sample_surv %>%
+  filter(is.element(OS, c(0,1)))
+
+surv_obj <- Surv(as.numeric(data_$FU.mjeseci), as.numeric(data_$OS))
+
+# Fit a survival model
+fit_2 <- survfit(surv_obj ~ data_$Location)
+p_ <- survdiff(surv_obj ~ data_$Location)$pvalue
+print(p_)
+# 
+# autoplot(fit_2, conf.int = FALSE) +
+#   theme_bw() +
+#   labs(x = "Time (months)", y = "Overall survival probability") +
+#   ggtitle(paste0("P value = ", round(p_, 2))) +
+#   # scale_color_discrete(labels = c("HPV neg", "HPV pos")) +
+#   scale_color_manual(values = c("OP" = "forestgreen", "O" = "firebrick")) +
+#                      # labels = c("0" = "HPV -", "1" = "HPV +")) +
+#   coord_cartesian(xlim = c(0, 94), ylim = c(0, 1)) +
+#   theme(legend.title = element_blank()) +
+#   coord_cartesian(xlim = c(0, 94), ylim = c(0, 1)) 
+
+autoplot(fit_2, conf.int = FALSE) +
+  theme_bw() +
+  labs(x = "Time (months)", y = "Overall survival probability") +
+  ggtitle(paste0("p-value = ", round(p_, 2))) +
+  # scale_color_discrete(labels = c("HPV neg", "HPV pos")) +
+  scale_color_manual(values = c("OP" = as.character(annot_col[["Tissue"]]["OP"]), "O" = as.character(annot_col[["Tissue"]]["O"])),
+                     # labels = c("0" = "N", "1" = "P"),
+                     name = "Tissue") +
+  coord_cartesian(xlim = c(0, 94), ylim = c(0, 1)) +
+      theme(
+        axis.title = element_text(size = 14),  # Increase axis label size
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 14)) 
+
+
+ggsave( file.path(project_dir, "data/output/figures/survival_curves", "Location_v0.png"))
+ggsave(width = 5,height = 3, file.path(project_dir, "data/output/figures/survival_curves", "Location.png"))
+```
+
+
+# Session Info
+```{r Session info}
+sessionInfo()
+```

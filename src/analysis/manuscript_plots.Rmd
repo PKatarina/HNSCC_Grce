@@ -56,6 +56,7 @@ calculate_shared_percentage <- function(vector1, vector2) {
 # Load data
 ```{r}
 mRNA_dds <- readRDS(file = file.path(project_dir, "data/processed/mRNA_dds.rds"))
+mRNA_res <- readRDS(file.path(project_dir, "data/processed", "mRNA_res.rds"))
                       
 mir_dds <- readRDS(file = file.path(project_dir, "data/processed/mir_dds.rds"))
 rnb_set <- readRDS(file = file.path(project_dir, "data/processed/rnb_set.rds"))
@@ -79,7 +80,8 @@ mRNA_rld <- DESeq2::rlog(mRNA_dds)
 mRNA_pcadata <- 
   DESeq2::plotPCA(mRNA_rld, 
                   intgroup = c("Hist", "HPV", "Tissue"),
-                  returnData = TRUE) %>%
+                  returnData = TRUE,
+                  ntop = 18104) %>%
   dplyr::rename(Sample ="Hist") %>%
   mutate(HPV = ifelse(HPV==1, "P","N"))
 # selecting variance
@@ -127,6 +129,150 @@ Saving to file
 ```{r, eval=FALSE}
 ggsave(height=10, width = 10, filename = file.path(project_dir, "data/output/figures/PCA_mRNA.pdf"))
 ```
+
+### Higher PC 
+```{r}
+# Assume df is your data frame
+pre_pca_data <-  assay(mRNA_rld)
+
+# Calculate variance of each row
+variances <- apply(pre_pca_data, 1, var)
+
+# Sort rows by variance
+pre_pca_data <- pre_pca_data[order(variances, decreasing = TRUE), ]
+
+# Select top 500 variable rows
+pre_pca_data <- pre_pca_data[1:500, ]
+
+# Uncomment this to do pca on whole gene expression data
+# pre_pca_data <-  assay(mRNA_rld)
+pca_res <- prcomp(t(pre_pca_data))
+
+mRNA_pcadata <- as.data.frame(pca_res$x)
+
+# Color for PCA 
+col_pca <- c(
+  # Dark red
+  brewer.pal(8, "Reds")[7],
+  brewer.pal(8, "Blues")[7]
+)
+
+col_pca_2 <- c(
+  brewer.pal(8, "Blues")[7], 
+  brewer.pal(8, "Reds")[2],
+  brewer.pal(8, "Reds")[7]
+)
+
+mRNA_pcadata$Sample <- as.vector(colData(mRNA_rld)$Hist)
+mRNA_pcadata$Tissue <- colData(mRNA_rld)$Tissue
+mRNA_pcadata$HPV <- ifelse(colData(mRNA_rld)$HPV == 1, "P","N")
+samples <- rownames(colData(mRNA_rld)) 
+mRNA_pcadata$HPV_ctat <- ifelse(colData(mRNA_rld)$HPV == 0, "N", ifelse(is.element(samples, c("KBD3", "KBD15", "KBD17")), "PP", "P"))
+
+# Get the variance explained by each principal component
+percentVar <- round(100 * (pca_res$sdev^2 / sum(pca_res$sdev^2)), 1)
+```
+
+
+```{r}
+plot_list <- list()
+
+# Loop over the first 10 principal components
+for(i in seq(1, 12, by = 2)) {
+
+    j = i+1
+    # plotting pca data
+    p <-
+    # ggplot(mRNA_pcadata, aes_string(x = paste0("PC", i), y = paste0("PC", j), color = "Tissue", shape = "HPV", fill = "Sample")) +
+    # For extra annotation
+    ggplot(mRNA_pcadata, aes_string(x = paste0("PC", i), y = paste0("PC", j), color = "Tissue", shape = "Sample", fill = "HPV_ctat")) +
+      geom_point(size =4, stroke =1.2) +
+      xlab(paste0("PC", i, ": ", percentVar[i], "% variance")) +
+      ylab(paste0("PC", j, ": ", percentVar[j], "% variance")) +
+      theme(panel.background = element_rect(fill = "white"),
+            panel.border = element_rect(fill = "transparent"),
+            panel.grid = element_line(color = brewer.pal(5,"Greys")[1]),
+            legend.key=element_blank(),
+            axis.title=element_text(size=18),
+            legend.text=element_text(size=18),
+            legend.title=element_text(size=18),
+            legend.position = "none") +  # Add this line to remove the legend
+      coord_fixed() +
+      scale_shape_manual(values = c(21, 22) )+
+      scale_color_manual(values = c("black", brewer.pal(5,"Greys")[3]) )+
+      scale_fill_manual(values= col_pca_2)+
+      guides(fill=guide_legend(override.aes=list(shape=21)))+
+      guides(color=guide_legend(override.aes=list(shape=21))) +
+      guides(fill=guide_legend(override.aes=list(shape=21, fill=c(col_pca))))
+    
+    
+    # Add the plot to the list
+    plot_list[[length(plot_list) + 1]] <- p
+    
+    # ggsave(filename = file.path(project_dir, "data/output/figures/PCA_plots", paste0("PC",i,"_","PC",j, ".png")))
+    # 
+}
+
+grid_plot <- do.call(arrangeGrob, c(plot_list, ncol = 3))
+
+ggsave(width = 10, height = 7,grid_plot, filename = file.path(project_dir, "data/output/figures/PCA_plots", "higher_PCA_grid_all_horizontal_ctat_annot.png"))
+
+```
+
+
+### Distnace
+Sample distance matrix
+```{r}
+
+sampleDist_mRNA <- stats::dist(t(pre_pca_data), method = "euclidean")
+# sampleDist_mRNA <- stats::dist(t(assay(mRNA_rld)), method = "manhattan")
+sampleDist_mRNA <- as.data.frame(as.matrix(sampleDist_mRNA))
+```
+
+
+```{r}
+annot_data <- data.frame(Sample = as.vector(colData(mRNA_rld)$Hist)) 
+rownames(annot_data) <- rownames(sampleDist_mRNA)
+annot_data$Tissue <- colData(mRNA_rld)$Tissue
+annot_data$HPV <- ifelse(colData(mRNA_rld)$HPV == 1, "P","N")
+
+colors <- rev(brewer.pal(8,"Blues"))
+
+annot_col <- list(
+  # Tumor colors
+  Sample = setNames(c(brewer.pal(8, "Reds")[7],  brewer.pal(8, "Blues")[7]),
+                   c("cancer", "control")),
+  # HPV colors
+  HPV = setNames( brewer.pal(8, "Paired")[c(3,4)], 
+                  c("P","N")),
+  # Tissue colors
+  Tissue = setNames(brewer.pal(8, "Paired")[c(7,8)],
+                    c("OP","O")),
+    # Smoking drinking colors
+  Smoking_Drinking = setNames( c("forestgreen","gold", "white"), 
+                  c("0","1", "?")),
+  Age = brewer.pal(9, "Greys"),
+  Gradus = setNames(brewer.pal(9, "Reds")[c(1,3,5,7,9)],
+                    c("nema nalaza", "0", "1", "2", "3"))
+)
+
+pheatmap(sampleDist_mRNA,
+         # clustering_distance_rows = sampleDist_mir,
+         # clustering_distance_cols = sampleDist_mir,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         col = colors,
+         # treeheight_col = 0,
+         treeheight_row = 0,
+         # annotation_row = annot_data,
+         annotation_col = annot_data,
+         annotation_colors = annot_col,
+         show_colnames = FALSE,
+         show_rownames = TRUE,
+         annotation_names_col = TRUE,
+         filename = file.path(project_dir, "data/output/figures/mRNA_sample_dist_euclid_dend.png"))
+```
+
 
 # miR distance
 Since I made a presentable PCA plot for mRNA data I will first make sample distance plot for miR
@@ -384,11 +530,9 @@ ggplot(mir_freq, aes(Freq))+
   geom_histogram()+
   stat_bin(binwidth = 1, bins = 50)
 ```
-# Mir mRNA scatterplots
+# Mir mRNA scatterplot
 
-```{r}
 
-```
 
 
 # DM CpGs
@@ -436,6 +580,15 @@ dnam_sites_TE <- join_overlap_left(dnam_res_sites_annotated, TE_sub) %>%
 rm(dnam_res_sites_annotated)
 rm(TE_sub)
 ```
+
+## Saving DM cpg as csv
+```{r}
+rownames(dnam_res_sites) <- rownames(rnb_set@meth.sites)
+
+write.table(dnam_res_sites, quote= FALSE, file = file.path(project_dir, "data/output/tables/dnam_res_sites.csv"))
+```
+
+
 
 ## TE Bar plots
 Only TE. from the sites
@@ -573,6 +726,27 @@ ggplot(dnam_te, aes(x=cpg_annotations, fill = status)) +
 ggsave(width = 7, height = 5, filename = file.path(project_dir, "data/output/figures/DM_sites_TE.png"))
 ```
 
+# DM CGIs
+## Load data
+```{r}
+dnam_res_sites <- readRDS(file.path(project_dir,"data/processed/dnam_res_cgi.rds"))
+```
+
+## Saving DM CGI as csv
+Preping for saving this as csv 
+supplemental table
+```{r}
+names(dnam_res_sites) <- 1:length(dnam_res_sites)
+
+data_ <- as.data.frame(dnam_res_sites) %>%
+  mutate(CGI_coordinates = str_c(seqnames,":", start,"-", end)) %>%
+  dplyr::select(ensembl, symbol, CGI_coordinates, log.quot, pvalue, padj, num.sites)
+
+
+write.table(data_, quote= FALSE, row.names = FALSE, file = file.path(project_dir, "data/output/tables/dnam_res_cgi.csv"))
+```
+
+
 
 # DE mRNA in HPV
 Treba ih poredati po abs FC
@@ -584,10 +758,11 @@ data_ <- mRNA_res_HPV %>%
   dplyr::select(-X)
 rownames(data_) <- c(1:length(data_$row))
 
-data_1 <- data_[c(1:16),]
+data_1 <- data_[c(1:18),]
 
 data_2 <- data_ %>%
-  filter(is.element(symbol, c("ZNF541", "PAX8", "TYMS", "ADCYAP1")))
+  # filter(is.element(symbol, c("ZNF541", "PAX8", "TYMS", "ADCYAP1")))
+  filter(is.element(symbol, c("ZNF541", "TYMS")))
 data_ <- rbind(data_1, data_2)
 
 data_ <- data_ %>%
@@ -615,7 +790,7 @@ ggplot(data_, aes(#x = as.numeric(rownames(data_)),
        color = "Log2 Fold Change")+
   theme(axis.text.y = element_text(face="bold"))
 
-ggsave(height = 5, width = 5, file.path(project_dir, "data/output/figures/mRNA_HPV_top20_genes_dotplot.png"))
+ggsave(height = 5, width = 5, file.path(project_dir, "data/output/figures/mRNA_HPV_top20_genes_dotplot_v2.png"))
 
   
   
@@ -784,6 +959,19 @@ ggplot(df, aes(x = xc, y = yc, fill = HPV)) +
 ggsave(height = 10, width = 10, filename = file.path(project_dir,"data/output/figures", "sample_table_legend_HPV.pdf"))
 
 ```
+
+# Figure 2 gprofiler
+Just redid this in "Exploratory_analysis_and_...." script
+```{r}
+GSEA_SOURCES <- c("GO:BP","KEGG","REAC", "TF")
+mRNA_DE <- dplyr::filter(as.data.frame(mRNA_res), padj < 0.05)
+
+gost_ <- gost(rownames(filter(as.data.frame(mRNA_res), padj < 0.05)),
+              gsea_)
+
+
+```
+
 
 # Session Info
 ```{r Session info}

@@ -50,6 +50,8 @@ mir_res_HPV <- readRDS(file.path(dir_dest, "mir_res_HPV.rds"))
 # DNAm
 rnb_set <- readRDS(file.path(dir_dest, "rnb_set.rds"))
 dnam_res_cgi <- readRDS(file.path(dir_dest, "dnam_res_cgi.rds"))
+
+
 ```
 Check if colnames mRNA dds is not null 
 ```{r}

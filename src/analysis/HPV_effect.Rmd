@@ -1,0 +1,256 @@
+---
+title: "Title"
+output: html_notebook
+---
+
+# Description
+Insert the descripiton of the notebook here.
+
+# Libraries
+```{r Libraries, message=FALSE}
+library(DESeq2)
+library(dplyr)
+library(gprofiler2)
+
+project_dir <- "/home/katarina/MyProjects/HNSCC"
+
+genes_dir <- file.path(project_dir, "data","input", "genes.hg19.ensembl.rds")
+project_dir <- "/home/katarina/MyProjects/HNSCC"
+source(file = file.path(project_dir,"src", "utils.R"))
+```
+
+# Load data
+```{r}
+
+mRNA_dds <- readRDS(file.path(project_dir, "data/processed", "mRNA_dds.rds"))
+mRNA_dds_HPV <- readRDS(file.path(project_dir, "data/processed", "mRNA_dds_HPV.rds"))
+
+mir_dds <- readRDS(file = file.path(project_dir, "data/processed/mir_dds.rds"))
+```
+
+
+### DE HPV
+```{r mRNA HPV effect on cancer, message=FALSE}
+# making another dds object with different design
+mRNA_dds_HPV <- mRNA_dds
+
+# mRNA_dds_HPV <- mRNA_dds_HPV[, !is.element(colnames(mRNA_dds_HPV),c("RNA3T", "RNA10T", "RNA16T"))]
+
+# New column in colData for design
+# colData(mRNA_dds_HPV)$HistHPV <-
+  # as.factor(paste0(colData(mRNA_dds_HPV)$Hist,colData(mRNA_dds_HPV)$HPV))
+
+# setting the HistHPV des
+design(mRNA_dds_HPV) =~ HPV
+
+# Running the DESeq function
+mRNA_dds_HPV <- DESeq(mRNA_dds_HPV, betaPrior = T)
+
+# Contrasting between negative HPV and controls
+# res.cN.nN <- 
+#   #results(mRNA_dds_HPV, contrast=c("HistHPV","cancerN","normalN"), tidy = T)
+#   results(mRNA_dds_HPV, contrast=c("HistHPV","cancer0","control0"), tidy = T)
+# # Contrasting between HPV negative and positive
+# res.cP.cN <- 
+#   #results(mRNA_dds_HPV, contrast=c("HistHPV","cancerP","cancerN"), tidy = T)
+#   results(mRNA_dds_HPV, 
+#           contrast=c("HistHPV","cancer1","cancer0"),
+#           tidy = F)
+
+res_HPV <- results(mRNA_dds_HPV)
+
+# summary(res.cP.cN, alpha=0.05)
+summary(res_HPV)
+
+# res.cP.cN <- 
+#   #results(mRNA_dds_HPV, contrast=c("HistHPV","cancerP","cancerN"), tidy = T)
+#   results(mRNA_dds_HPV, contrast=c("HistHPV","cancer1","cancer0"), tidy = T)
+# 
+# # selecting significant results
+# res.cP.cN <- dplyr::filter(res.cP.cN, padj < 0.1)
+# res.cN.nN <- dplyr::filter(res.cN.nN, padj < 0.1)
+# 
+# #  
+# mRNA_res_HPV <- res.cP.cN[!is.element(res.cP.cN$row, res.cN.nN$row),]
+# mRNA_res_HPV$symbol <- idMap(mRNA_res_HPV$row, genes_dir)
+# 
+# head(mRNA_res_HPV)
+
+```
+
+
+# CTAT defined HPV
+```{r}
+mRNA_dds_HPV <- mRNA_dds
+
+mRNA_dds_HPV <- mRNA_dds_HPV[, !is.element(colnames(mRNA_dds_HPV),c("RNA3T", "RNA10T", "RNA16T"))]
+
+# New column in colData for design
+colData(mRNA_dds_HPV)$ctatHPV <-
+  as.factor(sample(c("N","P","N","N","N","P","N","P","N","N")))
+  # as.factor(c("N","P","N","N","N","P","N","P","N","N"))
+
+# setting the HistHPV des
+design(mRNA_dds_HPV) =~ ctatHPV
+
+# Running the DESeq function
+mRNA_dds_HPV <- DESeq(mRNA_dds_HPV, betaPrior = T)
+
+# Contrasting between negative HPV and controls
+# res.cN.nN <- 
+#   #results(mRNA_dds_HPV, contrast=c("HistHPV","cancerN","normalN"), tidy = T)
+#   results(mRNA_dds_HPV, contrast=c("HistHPV","cancer0","control0"), tidy = T)
+# # Contrasting between HPV negative and positive
+# res.cP.cN <- 
+#   #results(mRNA_dds_HPV, contrast=c("HistHPV","cancerP","cancerN"), tidy = T)
+#   results(mRNA_dds_HPV, 
+#           contrast=c("HistHPV","cancer1","cancer0"),
+#           tidy = F)
+
+res_HPV <- results(mRNA_dds_HPV)
+
+# summary(res.cP.cN, alpha=0.05)
+summary(res_HPV)
+
+```
+
+# Location infulence
+
+```{r}
+# making another dds object with different design
+mRNA_dds_Location <- mRNA_dds
+
+# mRNA_dds_Location <- mRNA_dds_Location[, !is.element(colnames(mRNA_dds_Location),c("RNA3T", "RNA10T", "RNA16T"))]
+
+# New column in colData for design
+colData(mRNA_dds_Location)$HistLocation <-
+  as.factor(paste0(colData(mRNA_dds_Location)$Hist, colData(mRNA_dds_Location)$Tissue))
+
+# setting the HistHPV des
+design(mRNA_dds_Location) =~ HistLocation
+
+
+# Running the DESeq function
+mRNA_dds_Location <- DESeq(mRNA_dds_Location, betaPrior = F)
+# res_loc <- lfcShrink(mRNA_dds_Location, contrast=c("HistLocation","cancerOP","cancerO"), type = "normal")
+
+res_loc <- results(mRNA_dds_Location, contrast=c("HistLocation","cancerOP","cancerO"), alpha = 0.05, pAdjustMethod = "BH")
+
+summary(res_loc)
+```
+
+
+```{r}
+
+mRNA_dds_Location <- mRNA_dds
+
+# mRNA_dds_Location <- mRNA_dds_HPV[, !is.element(colnames(mRNA_dds_HPV),c("RNA3T", "RNA10T", "RNA16T"))]
+
+# New column in colData for design
+# colData(mRNA_dds_HPV)$HistHPV <-
+  # as.factor(paste0(colData(mRNA_dds_HPV)$Hist,colData(mRNA_dds_HPV)$HPV))
+
+# setting the HistHPV des
+design(mRNA_dds_Location) =~ Tissue
+
+# Running the DESeq function
+mRNA_dds_Location <- DESeq(mRNA_dds_Location, betaPrior = T)
+# mRNA_dds_Location <- lfcShrink(mRNA_dds_Location)
+
+# Contrasting between negative HPV and controls
+# res.cN.nN <- 
+#   #results(mRNA_dds_HPV, contrast=c("HistHPV","cancerN","normalN"), tidy = T)
+#   results(mRNA_dds_HPV, contrast=c("HistHPV","cancer0","control0"), tidy = T)
+# # Contrasting between HPV negative and positive
+# res.cP.cN <- 
+#   #results(mRNA_dds_HPV, contrast=c("HistHPV","cancerP","cancerN"), tidy = T)
+#   results(mRNA_dds_HPV, 
+#           contrast=c("HistHPV","cancer1","cancer0"),
+#           tidy = F)
+
+res_loc <- results(mRNA_dds_Location, alpha = 0.05)
+
+# summary(res.cP.cN, alpha=0.05)
+summary(res_loc)
+```
+
+# mir HPV markers
+```{r}
+mir_dds
+mir_hpv_markers <- c("hsa-miR-9-5p", "hsa-miR-20b-5p", "hsa-miR-146a-5p", "hsa-miR-193b-5p", "hsa-miR-193b-3p", "hsa-miR-363-3p")
+
+# plotCounts(mir_dds, "hsa-miR-9-5p", intgroup = "HPV")
+samples <- c("KBD2", "KBD3", "KBD10", "KBD11", "KBD13", "KBD15", "KBD16", "KBD17", "KBD18", "KBD21", "RNA3T", "RNA10T", "RNA16T")
+sample_HPV <- c("N", "PP", "N", "N", "P", "PP", "N", "PP", "N", "P","N","N","N")
+
+names(sample_HPV) <- samples
+
+
+mir_dds_subset <- mir_dds[, is.element(colnames(mir_dds) ,samples)]
+
+mir_dds_subset <- mir_dds_subset[, !is.element(colnames(mir_dds_subset),c("RNA3T", "RNA10T", "RNA16T"))]
+
+colData(mir_dds_subset)$HPV_ctat <- as.factor(sample_HPV[colnames(mir_dds_subset)])
+
+data_ <- counts(mir_dds_subset, normalized = TRUE)[is.element(rownames(mir_dds), mir_hpv_markers),] %>%
+  as.data.frame()
+samples_ <- colnames(data_)
+data_$mir <- rownames(data_)
+
+data_ <-
+    pivot_longer(as.data.frame(data_),
+    cols =samples_, 
+    names_to = "samples", 
+    values_to = "counts")
+  
+data_ <- left_join(data_, select(as.data.frame(colData(mir_dds_subset)), names, HPV, HPV_ctat), by = c("samples" = "names"))
+
+
+ggplot(data_, aes(x = mir, y = log10(counts))) +
+  # ggplot(data_, aes(x = mir, y = counts)) +
+  #   ylim(0,100) +
+    geom_boxplot(width = 0.4, outlier.alpha = 0, position=position_dodge(1), aes(color = HPV)) +
+    # geom_jitter(aes(fill = HPV))
+    geom_point(position=position_jitterdodge(dodge.width=1), aes(colour = HPV_ctat)) +
+    # scale_x_discrete() 
+    # geom_jitter(aes(colour = HPV_ctat, x = mir), # position = position_jitter(width = .05), alpha = 0.5)
+    theme_bw() +
+    scale_color_manual(values = setNames( brewer.pal(8, "Paired")[c(4, 6, 3)], c("P","N", "PP"))) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.3, hjust=0.3))
+
+ggsave(width = 7, height =5,filename = file.path(project_dir, "data/output/figures/HPV_miR_markers_counts.png"))
+```
+
+
+```{r}
+for(mir in mir_hpv_markers){
+  print(mir)
+  
+  plotCounts(mir_dds_subset, mir, "HPV_ctat")
+  
+  t <- t.test(counts(mir_dds_subset, normalized = TRUE)[is.element(rownames(mir_dds), mir), colData(mir_dds_subset)$HPV == "P"],
+         counts(mir_dds_subset, normalized = TRUE)[is.element(rownames(mir_dds), mir), colData(mir_dds_subset)$HPV == "N"])
+  
+  print(t)
+  
+  
+  t <- t.test(counts(mir_dds_subset, normalized = TRUE)[is.element(rownames(mir_dds), mir), colData(mir_dds_subset)$HPV_ctat == "PP"],
+         counts(mir_dds_subset, normalized = TRUE)[is.element(rownames(mir_dds), mir), is.element(colData(mir_dds_subset)$HPV_ctat, c("N", "P"))])
+  
+  print(t)
+  
+}
+
+```
+
+
+
+```{r}
+data_ %>%
+  pivot_longer()
+```
+
+# Session Info
+```{r Session info}
+sessionInfo()
+```

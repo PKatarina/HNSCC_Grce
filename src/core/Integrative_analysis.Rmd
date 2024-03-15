@@ -41,7 +41,7 @@ genes_dir <- file.path(project_dir, "data/input/genes.hg19.ensembl.rds")
 ```
 
 
-  # Loading data
+# Loading data
 ```{r Libraries, message=FALSE}
 
 ## 01

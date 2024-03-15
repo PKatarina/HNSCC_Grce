@@ -172,7 +172,21 @@ plotKmeansPheatmap <- function(tb, additional_annotation = NULL, custom_cluster_
   #rownames(tb) <- 1:nrow(tb)
 
   # Additional annotations
-  if(!is.null(additional_annotation)){pass}
+  if(!is.null(additional_annotation)){
+   annotRows <- merge(annotRows, additional_annotation, by ="row.names") 
+   rownames(annotRows) <- annotRows$Row.names
+   annotRows$Row.names <- NULL
+   
+  annotColors$venn <- c("DM-DEGs" = "#81c483", 
+                       "DEmiRs-DEGs" = "#ffaf6c",
+                       "DEmiRs+DM-DEGs" = "#917241",
+                       "noReg-DEGs" = "gray")  
+   
+  }
+  print(annotRows)
+
+  
+  print(annotColors)
 
 
   # Main plotting function
@@ -345,4 +359,61 @@ barPlotData <- function(tb, cluster, unscaled_data = NULL){
   
   output$groups <- factor(output$groups, levels = output$groups)
   return(output)
+}
+
+
+integrateOmicsDataTCGA <- function(mrna_res_obj, mir_res_obj, dnam_res_obj, mir_targets_cor, genes_file){
+  # @description: This data takes res objects and creates a joined data frame
+  # that contains significant mRNA and its respected mir targets and dnam 
+  # data (which are not filtered for significance)
+  
+  # Transforming mrna res object to a dataframe
+  mrna_res_obj <- as.data.frame(mrna_res_obj) %>%
+    dplyr::filter(padj < 0.05)
+  
+  # Transforming mir data to dataframe and renaming columns
+  mir_res_obj <- 
+    tibble::rownames_to_column(as.data.frame(mir_res_obj), var = "mir") %>%
+    dplyr::select(mir,
+                  mir_mean = "baseMean",
+                  mir_FC = "log2FoldChange",
+                  mir_pval = "pvalue",
+                  mir_padj = "padj")
+  
+  # Transformin dnam data to df and renaming columns
+  
+  # names(dnam_res_obj) <-  1:length(dnam_res_obj)
+  # # dnam_res_obj = unique(dnam_res_obj) %>%
+  # dnam_res_obj <- dnam_res_obj %>%
+  #   as.data.frame() %>%
+  #   dplyr::mutate(dnam_condensed_ranges = stringr::str_c(seqnames,":",start,"-",end, sep = "")) %>%
+  #   dplyr::select(gene = "ensembl",
+  #                 dnam_quot = "log.quot",
+  #                 dnam_pval = "pvalue",
+  #                 dnam_padj = "padj",
+  #                 dnam_num_sites = "num.sites",
+  #                 dnam_condensed_ranges)
+  
+  
+  # Integrated (joined) table stored as res
+  res <- 
+    data.frame(gene=rownames(mrna_res_obj),
+               gene_mean = mrna_res_obj$baseMean,
+               gene_FC=mrna_res_obj$log2FoldChange,
+               gene_pval=mrna_res_obj$pvalue,
+               gene_padj=mrna_res_obj$padj) %>%
+    # Adding hgnc symbols
+    dplyr::mutate(symbol= idMap(gene,genes_file = genes_file)) %>%
+    # Reaaranging columns
+    dplyr::select(gene, symbol, everything()) %>%
+    # Adding mir correlation data
+    dplyr::left_join(dplyr::select(mir_targets_cor, gene, mir, mir_r = r, mir_r_pval = pvalue), by = "gene") %>%
+    # Adding mir differential expression data
+    dplyr::left_join(mir_res_obj, by="mir") %>%
+    # Adding dnam quotient of intesity of DNA metylation in cgi promoters
+    dplyr::left_join(dnam_res_obj, by = "gene")
+  
+  #print(res)
+  
+  return(res)
 }

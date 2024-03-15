@@ -1,0 +1,733 @@
+---
+title: "Regulation targets"
+author: "Katarina Mandić"
+date: "`r format(Sys.time(), '%d %b, %Y')`"
+output:
+  html_document:
+    css: style.css
+---
+
+# Description
+This is regulation targets analysis of TCGA results
+
+# Libraries
+```{r Libraries, message=FALSE}
+library(multiMiR)
+library(knitr)
+library(dplyr)
+library(rprojroot)
+library(DESeq2)
+library(tidyverse)
+
+# Project directory
+project_dir <- find_rstudio_root_file()
+
+source(file = file.path(project_dir,"src", "utils.R"))
+```
+
+# Loading data
+```{r}
+# Destination of outputs from 01-Exploratory_analysis_and_diff_expression 
+# dir_dest <- "/home/katarina/MyProjects/HNSCC/01-Exploratory_analysis_and_differential_expression/outputs/RDS"
+
+# Loading all processed data
+# dir_dest <- file.path(project_dir, "data/processed/")
+# 
+# 
+# # mRNA
+# mRNA_dds <- readRDS(file.path(dir_dest, "mRNA_dds.rds"))
+# mRNA_dds_HPV <- readRDS(file.path(dir_dest, "mRNA_dds_HPV.rds"))
+# mRNA_res <- readRDS(file.path(dir_dest, "mRNA_res.rds"))
+# mRNA_res_HPV <- readRDS(file.path(dir_dest, "mRNA_res_HPV.rds"))
+# 
+# 
+# # mir
+# mir_dds <- readRDS(file.path(dir_dest, "mir_dds.rds"))
+# mir_dds_HPV <- readRDS(file.path(dir_dest, "mir_dds_HPV.rds"))
+# mir_res <- readRDS(file.path(dir_dest, "mir_res.rds"))
+# mir_res_HPV <- readRDS(file.path(dir_dest, "mir_res_HPV.rds"))
+# 
+# # DNAm
+# rnb_set <- readRDS(file.path(dir_dest, "rnb_set.rds"))
+# dnam_res_cgi <- readRDS(file.path(dir_dest, "dnam_res_cgi.rds"))
+
+mRNA_dds <- readRDS(file.path(project_dir, "data/processed/TCGA_mRNA_dds.rds"))
+mRNA_res <- read.csv(file.path(project_dir, "data/processed/TCGA_mRNA_deseq2_results.csv"), row.names = 1)
+
+mir_res <- read.csv(file.path(project_dir, "data/processed/TCGA_miR_deseq2_results.csv"), row.names = 1)
+mir_dds <- readRDS(file.path(project_dir, "data/processed/TCGA_miR_dds.rds"))
+
+dnam_res_cgi <- read.csv(file.path(project_dir, "data/processed/TCGA_dnam_limma_out_cgis_topTable.csv"), sep = ",", row.names = 1)
+
+dnam_res_annot <- read.csv(file.path(project_dir, "data/processed/TCGA_dnam_limma_annot_cgis.csv"), row.names = 1)
+```
+
+# Modify gene names
+```{r}
+# Filter out NA
+# mRNA_res <- filter(mRNA_res, !is.na(log2FoldChange))
+# 
+# # remove verisons of enselbm gene names
+# rownames(mRNA_res) <- str_split(rownames(mRNA_res), pattern =  "\\.", simplify = T)[,1]
+
+
+
+```
+
+
+# GSEA of DE genes
+```{r}
+GSEA_SOURCES <- c("GO:BP", "KEGG", "REAC")
+mRNA_DE <- dplyr::filter(as.data.frame(mRNA_res), padj < 0.05)
+
+# Call on the gost 
+gost_mRNA <- 
+  gost(rownames(mRNA_DE),
+       organism= "hsapiens",
+       exclude_iea=TRUE,
+       domain_scope="annotated",
+       ordered_query=F,
+       sources=GSEA_SOURCES)
+
+# Change query name
+gost_mRNA$result$query <- "DE genes vs genome"
+
+#Plot and table of significant results
+gostplot(gost_mRNA ,capped = F, interactive = T)
+
+GSEA_terms_to_highlight <- 
+  read.csv(file.path(project_dir, "data/input/GSEA_terms.txt"),
+           header = F)[,1]
+
+publish_gostplot(gostplot(gost_mRNA ,capped = F, interactive = F),
+                 highlight_terms = GSEA_terms_to_highlight,
+                 filename = file.path(project_dir, "data/output/figures/TCGA_DE_mRNA_GSEA.tiff"))
+```
+
+
+# miR - mRNA
+##Interactions
+
+Interaction tables are obtained by querying with multimir package. Setting up the query.
+```{r}
+# Significant mir's
+mir_query <- rownames(dplyr::filter(as.data.frame(mir_res), padj < 0.05))
+
+# Significant mRNA
+mRNA_query <- rownames(dplyr::filter(as.data.frame(mRNA_res), padj < 0.05))
+
+print(paste("Length of mir query: ", length(mir_query),
+             "   Length of mRNA query: ", length(mRNA_query)))
+```
+Querying the database
+
+```{r, eval=TRUE}
+database <- "mirtarbase"
+
+# Querying
+multi_db <- get_multimir(mirna = mir_query,
+                         target = mRNA_query,
+                         table = database)
+
+# Selecting results
+targ_mir_mRNA <- 
+  multiMiR::select(multi_db,
+                   keytype = "type",
+                   keys = "validated",
+                   columns = c("mature_mirna_id", 
+                               "target_ensembl",
+                               "target_symbol",
+                               "support_type"))
+
+# Removing duplicates and removing type column (redundant)
+# targ_mir_mRNA <- unique(dplyr::select(targ_mir_mRNA, -type))
+targ_mir_mRNA <- unique(targ_mir_mRNA)
+
+rm(multi_db)
+
+head(targ_mir_mRNA)
+```
+
+
+```{r, eval=FALSE}
+saveRDS(targ_mir_mRNA, file.path(project_dir,"data/processed/TCGA_targ_mir_mRNA.rds"))
+
+```
+
+
+```{r}
+targ_mir_mRNA <- readRDS(file.path(project_dir,"data/processed/TCGA_targ_mir_mRNA.rds"))
+```
+
+
+```{r}
+print(c(paste("Number of mRNA mir interactions: ", dim(targ_mir_mRNA)[1]),
+        paste("Number of mirs in interactions: ",
+              length(unique(targ_mir_mRNA$mature_mirna_id))),
+        paste("Number of target genes :", 
+              length(unique(targ_mir_mRNA$target_ensembl)))))
+```
+```{r}
+# Frequency table of mir's in the interaction table
+table(targ_mir_mRNA$mature_mirna_id) %>%
+  as.data.frame() %>%
+  arrange(desc(Freq)) %>%
+  head()
+```
+
+```{r}
+# Frequency of genes in interaction table
+head(table(targ_mir_mRNA$target_symbol) %>%
+  as.data.frame() %>%
+  arrange(desc(Freq)))
+```
+
+GSEA analysis on genes under mir regulation. Around half of DE genes are targets for mir regulation. Terms that appear in GSEA analysis are involved in regulation of cellular processes, regulation of transcription, there is a KEGG term proteoglyncans in cancer, and several REACTOME terms involved in cell cycle regulation.
+```{r}
+# Using only part of sources
+GSEA_SOURCES <- c("GO:BP","CORUM","KEGG","REAC","WP","MIRNA", "TF")
+
+# Calling gost function
+gost_res <- 
+    gost(targ_mir_mRNA$target_ensembl,
+       organism= "hsapiens",
+       exclude_iea=TRUE,
+       domain_scope="annotated",
+       ordered_query=F,
+       sources=GSEA_SOURCES)
+
+# Change query name
+gost_res$result$query <- "Mir targets on whole genome background"
+
+gostplot(gost_res, capped = FALSE)
+```
+
+## HPV Effect
+Querying the database for mirs and mRNA that are DE in the HPV group.
+
+Building queries
+```{r}
+# # building mir query
+# mir_HPV_query <- filter(as.data.frame(mir_res_HPV), pvalue < 0.05)$row
+# 
+# # building mRNA query
+# mRNA_HPV_query <- filter(as.data.frame(mRNA_res_HPV), pvalue < 0.05)$row
+# 
+# print(paste("Length of mir query: ", length(mir_HPV_query),
+#              "   Length of mRNA query: ", length(mRNA_HPV_query)))
+```
+
+```{r}
+# querying all databases that contain predicted interactions
+# multi_db <- get_multimir(mirna = mir_HPV_query,
+#                          target = mRNA_HPV_query,
+#                          table = "predicted")
+# 
+# # Selecting columns
+# targ_mir_mRNA_HPV <- 
+#   multiMiR::select(multi_db,
+#                    keytype = "type",
+#                    keys = "predicted",
+#                    columns = c("mature_mirna_id", 
+#                                "target_ensembl",
+#                                "target_symbol"))
+# 
+# # Selecting only unique interaction, dropping type
+# targ_mir_mRNA_HPV <-unique(dplyr::select(targ_mir_mRNA_HPV, -type))
+# 
+# targ_mir_mRNA_HPV
+```
+
+
+
+```{r}
+# Frequency table of mir's in the interaction table
+table(targ_mir_mRNA_HPV$mature_mirna_id) %>%
+  as.data.frame()%>%
+  arrange(desc(Freq))
+
+# Frequency of genes in interaction table
+table(targ_mir_mRNA_HPV$target_symbol) %>%
+  as.data.frame()%>%
+  arrange(desc(Freq))
+```
+
+```{r}
+# Using only part of sources
+GSEA_SOURCES <- c("GO:BP","CORUM","KEGG","REAC","WP","MIRNA", "TF")
+
+# Calling gost function
+gost_res <- 
+    gost(targ_mir_mRNA_HPV$target_ensembl,
+       organism= "hsapiens",
+       exclude_iea=TRUE,
+       domain_scope="annotated",
+       ordered_query=F,
+       sources=GSEA_SOURCES)
+
+# Change query name
+gost_res$result$query <- "Mir HPV targets on whole genome background"
+
+gostplot(gost_res, capped = FALSE)
+```
+## Correlation
+
+Testing count correlation for mir and mRNA for interaction pairs. Input are normalized count data for the 13 intersecting samples. This table will be used for picking the best mir to attach in the integrative table.
+
+```{r, eval=FALSE}
+# Data frame with correlations
+cor_mir <- 
+  dplyr::select(targ_mir_mRNA,
+                mir = mature_mirna_id,
+                symbol = target_symbol,
+                gene = target_ensembl) %>%
+  mutate(mir = tolower(mir))
+
+# rownames(colData(mir_dds)) <- colData(mir_dds)$Sample.ID
+# rownames(colData(mRNA_dds)) <- colData(mRNA_dds)$Sample.ID
+
+mir_mRNA_samples <- colnames(mRNA_dds)[is.element(colnames(mRNA_dds), colnames(mir_dds))]
+
+cor_mir$r <- NA
+cor_mir$pvalue <- NA
+
+# Looping through all the pairs.
+for(i in 1:dim(cor_mir)[1]){
+  if(i%%100 ==0){
+    message(paste("Processing pair number: ",i,
+                  " mir: ",cor_mir$mir[i],
+                  " gene ",  cor_mir$symbol[i]))
+  }
+  c <- 
+    cor.test(x=as.numeric(
+      counts(mir_dds, normalize=TRUE)[cor_mir$mir[i], mir_mRNA_samples]),
+      y=as.numeric(
+        counts(mRNA_dds, normalize=TRUE)[cor_mir$gene[i], mir_mRNA_samples]),
+      method="spearman",
+      exact = FALSE)
+  cor_mir$r[i] <- c$estimate
+  cor_mir$pvalue[i] <- c$p.value
+}
+
+# Saving cor_mir object into RDS because of long computing time
+saveRDS(cor_mir, file.path(project_dir, "data/processed/TCGA_cor_mir.rds"))
+writexl::write_xlsx(cor_mir,file.path(project_dir, "data/output/tables/TCGA_cor_mir.xlsx"))
+```
+
+```{r}
+# best correlations
+# cor_mir <- readRDS(file.path(project_dir, "data/processed/cor_mir.rds"))
+head(dplyr::arrange(cor_mir,r))
+tail(dplyr::arrange(cor_mir,r))
+```
+
+# DNAm - mRNA
+
+Creating an DNA methylation and mRNA table. As input for DNAm a granges object with cpg island intervals and a column that contains gene names whose promoter region overlaps that cpg island.
+
+```{r}
+mRNA_DE <- dplyr::filter(as.data.frame(mRNA_res), padj < 0.05)
+mRNA_DE <- mRNA_DE %>%
+  filter(str_detect(rownames(mRNA_DE), "ENSG"))
+
+# This file was provided by Anja. It is a file with different gene ids.
+genes_dir <- file.path(project_dir, "data","input", "genes.hg19.ensembl.rds")
+
+mRNA_DE$symbol <- idMap(rownames(mRNA_DE), genes_dir)
+mRNA_DE$ensembl <- rownames(mRNA_DE)
+
+```
+
+
+```{r}
+# subeset only cpg islands, 
+dnam_annot_sub <- dnam_res_annot[match(dnam_res_annot$Islands_Name, rownames(dnam_res_cgi)),  ]
+
+rownames(dnam_annot_sub) <- NULL
+
+dnam_annot_sub <-
+  dnam_annot_sub %>%
+  select(Islands_Name, UCSC_RefGene_Name) %>%
+  unique()
+
+
+
+dnam_res_cgi_ <- dnam_res_cgi 
+dnam_res_cgi_$Islands_Name <- rownames(dnam_res_cgi_)
+
+# ADd FDR correction
+# dnam_res_cgi_$padj <- p.adjust(dnam_res_cgi_$P.value.individualPrimary.Tumor, method = "fdr")
+
+# CpG islands as rownames
+dnam_res_cgi_ <- left_join(dnam_res_cgi_, dnam_annot_sub)
+```
+
+
+```{r}
+dnam_res_cgi_ <- dnam_res_cgi_ %>%
+  filter(adj.P.Val < 0.05) %>%
+  separate_rows(UCSC_RefGene_Name, sep = ";") %>%
+  unique() %>%
+  filter(UCSC_RefGene_Name != "") 
+
+targ_dnam_mRNA <- left_join(mRNA_DE, dnam_res_cgi_, by = c("symbol" = "UCSC_RefGene_Name"))
+
+```
+
+
+```{r, eval=FALSE}
+saveRDS(targ_dnam_mRNA, file.path(project_dir,"data/processed/TCGA_targ_dnam_mRNA.rds"))
+```
+Some of the cpg (19) islands overlap more than one gene promoter, and 72 genes have 2 (exactly) cpg islands in their promoters.
+
+GSEA GSEA analysis on genes that are under methylation regulation. There many terms from TF source which is expected. Since the differentially methylated cpg islands that were selected are in promoter regions of those genes. Also in from the reactom database there are many terms involved in the regulation of the cell cycle.
+
+```{r, all DEGs}
+# targ_dnam_mRNA <- readRDS("outputs/RDS/targ_dnam_mRNA.rds")
+# Using only part of sources
+# GSEA_SOURCES <- c("GO:BP","CORUM","KEGG","REAC","WP","MIRNA", "TF")
+
+query <- targ_dnam_mRNA %>%
+           # as.data.frame() %>%
+           #filter(log.quot >0 & gene_FC <0) %>%
+          filter(!is.na(Islands_Name)) 
+           pull(ensembl)
+
+# Calling gost function
+gost_res <- 
+    gost(query,
+      #targ_dnam_mRNA$ensembl,
+       organism= "hsapiens",
+       exclude_iea=TRUE,
+       domain_scope="annotated",
+      # custom_bg = rownames(mRNA_res),
+       ordered_query=F,
+      #custom_bg = rownames(DE_mRNA),
+       sources=GSEA_SOURCES)
+
+# Change query name
+gost_res$result$query <- "DEGs with DM promoters"
+
+gostplot(gost_res, capped = FALSE)
+# writexl::write_xlsx(gost_res$result,path =file.path(project_dir, "data/output/tables/GSEA_on_DEGs_with_DM_promoters.xlsx"))
+```
+
+
+```{r}
+# print(filter(targ_dnam_mRNA, padj < 0.05, gene_padj < 0.05, (gene_FC <0 & log.quot > 0)) %>% length()) 
+# message("Downregulated genes with hypermethylated promoters, padj<0.05")
+# print(filter(targ_dnam_mRNA, padj < 0.05, gene_padj < 0.05, (gene_FC > 0 & log.quot < 0)) %>% length()) 
+# message("Upregulated genes with hypomethylated promoters, padj<0.05")
+```
+
+
+# Comparison with OUR
+
+## Load data
+```{r}
+mRNA_res <- read.csv(file.path(project_dir, "data/processed/TCGA_mRNA_deseq2_results.csv"), row.names = 1)
+mRNA_res_grce <- readRDS(file.path(project_dir, "data/processed/mRNA_res.rds"))
+
+```
+
+
+Comparing DE log2Fold change TCGA versus our data
+```{r}
+
+data_ <- mRNA_res_grce %>%
+  as.data.frame() %>%
+  filter(padj < 0.05)
+
+data_$gene <- rownames(data_)
+rownames(data_) <- NULL
+
+temp <- mRNA_res %>%
+  filter(padj < 0.05)
+temp$gene <- rownames(temp)
+
+data_ <- inner_join(data_, temp, by = "gene")
+
+
+
+data_ <- data_ %>%
+  mutate(my.color = case_when(
+    log2FoldChange.y > 0 & log2FoldChange.x > 0 ~ "blue",
+    log2FoldChange.y < 0 & log2FoldChange.x < 0 ~ "red",
+    TRUE ~ "gray"
+  ))
+
+color_palette <- c("blue" = brewer.pal(8, "Paired")[2], "red" = brewer.pal(8, "Paired")[6], "gray" = "gray10")
+
+# col_ <- brewer.pal(8, "Paired")[5]
+
+n_rows <- nrow(data_)
+
+ggplot(data_, aes(x = log2FoldChange.y, y = log2FoldChange.x, color = my.color)) +
+  geom_point(alpha = 0.5) +  # Make points hollow and transparent
+  geom_hline(yintercept = 0,  color = "black") +  # Add line for y=0
+  geom_vline(xintercept = 0,  color = "black") +  # Add line for x=0
+  geom_abline(intercept = 0, slope = 1, color = "gray50", alpha = 0.8, size = 0.8) +  # Add y=x line
+  labs(
+    title = paste("Scatter plot of log2FC values (n =", n_rows, ")"),  # Add title
+    x = "TCGA log2FC", 
+    y = "Our log2FC"
+  ) +  # Change axis labels
+  theme_bw() +
+  theme(
+    plot.title = element_text(size = 20),  # Increase title font size
+    axis.title.x = element_text(size = 16),  # Increase x axis label font size
+    axis.title.y = element_text(size = 16),  # Increase y axis label font size
+    legend.text = element_text(size = 14)  # Increase legend font size
+  ) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  scale_color_manual(values = color_palette)
+
+ggsave(filename = file.path(project_dir, "data/output/figures/TCGA_FC_scatterplot.png"))
+# dim(data_)
+```
+
+### MA plots
+```{r}
+mRNA_res_obj <- results(mRNA_dds)
+```
+
+```{r}
+DESeq2::plotMA(mRNA_res_grce)
+DESeq2::plotMA(mRNA_res_obj)
+
+# mRNA_res <- as.data.frame(mRNA_res_obj)
+
+
+data_ <- as.data.frame(mRNA_res) %>%
+  mutate(annot = case_when(is.element(rownames(mRNA_res), degs_overlaped) ~ "Overlap",
+                           padj < 0.05 ~ "Significant",
+                           TRUE ~ "Not significant"))
+
+data_$annot <- factor(data_$annot, levels = rev(c("Overlap", "Significant", "Not significant")))
+
+
+ggplot(data_, aes(x = baseMean, y = log2FoldChange, color = annot)) +
+  geom_point(alpha = 1, size = 0.2) +
+  ylim(-4,4) +
+  geom_hline(yintercept = 0,  color = "black")  +
+    scale_x_log10(limits = c(0.01, 1e7)) +  # Set x axis limits from 1 to 10^7
+  # xlim() +
+  theme_bw() +
+  scale_color_manual(values = c("Not significant" = "gray40", "Significant" = "blue", "Overlap" = "red"))
+
+ggsave( width =  10, height = 5, filename =  file.path(project_dir, "data/output/figures/TCGA_MA_plot.png"))
+```
+
+
+
+# Integrate
+
+## Load data
+```{r}
+
+mRNA_res <- read.csv(file.path(project_dir, "data/processed/TCGA_mRNA_deseq2_results.csv"), row.names = 1)
+
+targ_mir_mRNA <- readRDS(file.path(project_dir,"data/processed/TCGA_targ_mir_mRNA.rds"))
+targ_dnam_mRNA <- readRDS(file.path(project_dir,"data/processed/TCGA_targ_dnam_mRNA.rds"))
+
+mRNA_dds <- readRDS(file.path(project_dir, "data/processed/TCGA_mRNA_dds.rds"))
+mRNA_res <- read.csv(file.path(project_dir, "data/processed/TCGA_mRNA_deseq2_results.csv"), row.names = 1)
+
+mir_res <- read.csv(file.path(project_dir, "data/processed/TCGA_miR_deseq2_results.csv"), row.names = 1)
+mir_cor <- readRDS(file.path(project_dir, "data/processed/TCGA_cor_mir.rds"))
+
+
+genes_dir <- file.path(project_dir, "data","input", "genes.hg19.ensembl.rds")
+```
+
+# IntegrateOmics func
+Modify this function so that its adapted for TCGA
+```{r}
+
+
+```
+
+### Integrate prep
+
+Preparing mir data for integrateOmics func
+```{r}
+
+
+```
+
+Preparing dnam for integrateOmics func
+```{r}
+dnam_res_cgi
+
+
+dnam_res_cgi <- targ_dnam_mRNA %>%
+  # select("dnam_condensed_ranges" = Islands_Name, "dnam_quot" = Coef.individualPrimary.Tumor, "dnam_pvalue" = P.value.individualPrimary.Tumor, "dnam_padj" = padj.y,  gene = "ensembl") %>%
+    select("dnam_condensed_ranges" = Islands_Name, "dnam_quot" = logFC, "dnam_pvalue" = P.Value, "dnam_padj" = adj.P.Val,  gene = "ensembl") %>%
+  filter(!is.na(dnam_condensed_ranges))
+```
+
+
+```{r}
+# remove mRNA_res first few rows
+mRNA_res <- mRNA_res %>%
+  filter(str_detect(rownames(mRNA_res), "ENSG"))
+
+
+integ_df <- integrateOmicsDataTCGA(mrna_res_obj =  mRNA_res,
+                       mir_res_obj = mir_res,
+                       dnam_res_obj = dnam_res_cgi,
+                       mir_targets_cor = mir_cor,
+                       genes_file = genes_dir)
+```
+
+## filtering best mir and dnam
+
+```{r}
+reg_df <-
+  integ_df %>%
+  # Group by gene to compare their regulators
+  dplyr::group_by(gene) %>%
+  # Storing the best correlating mir into best_cor column
+  # NA is for those that are not under mir regulation
+  dplyr::mutate(best_cor=ifelse(!is.na(mir_r), mir[which.max(abs(mir_r))], NA)) %>%
+  # filtering out mirs that are not the best putative regulators
+  dplyr::filter(is.na(mir) | mir == best_cor)  %>%
+  # Storing the cgi with max abs value in best_cgi
+  dplyr::mutate(best_cgi= ifelse(!is.na(dnam_quot),                                 dnam_condensed_ranges[which.max(abs(dnam_quot))],
+                                 NA)) %>%
+  # Filtering out cgi that are not the best
+  dplyr::filter(is.na(dnam_condensed_ranges) |
+                  dnam_condensed_ranges == best_cgi) %>%
+  # Dropping uneeded columns. This info is already in mggsaveir and dnam ranges
+  dplyr::select(-best_cor, -best_cgi) %>%
+  ungroup() %>%
+  unique()
+
+reg_df
+
+
+```
+
+SAving files
+```{r}
+saveRDS(reg_df, file.path(project_dir, "data/processed/TCGA_integrated_table_per_GENE.rds"))
+writexl::write_xlsx(reg_df, file.path(project_dir, "data/output/tables/TCGA_integrated_table_per_GENE.xlsx"))
+```
+
+# Clustering
+Using two unsupervised clustering methods SOM and kmeans to explore clusters of genes under different combination of regulations. Features are fold changes of mRNA and mir data and quotient of beta intensity value for dna methylation. We hypothesized that groups with mRNA FC values will be opposite of mir and dnam regulators which would suggest that those groups are under regulation of mir and/or dnam.
+
+
+
+### DEGs that are overlapped between ours and TCGA
+```{r}
+
+data_ <- mRNA_res_grce %>%
+  as.data.frame() %>%
+  filter(padj < 0.05)
+
+data_$gene <- rownames(data_)
+rownames(data_) <- NULL
+
+temp <- mRNA_res %>%
+  filter(padj < 0.05)
+temp$gene <- rownames(temp)
+
+data_ <- inner_join(data_, temp, by = "gene")
+
+degs_overlaped <- data_$gene
+
+```
+
+## **kmeans**
+K means clusters mRNA genes into k number of clusters in which each mRNA belongs to the cluster with the nearest mean (or cluster centroid). For more details look at the lecture materials from pmf machine learning.
+```{r}
+reg_df  <- readRDS(file.path(project_dir, "data/processed/TCGA_integrated_table_per_GENE.rds"))
+
+# Try setting gene_padj 0.001
+# reg_df <- filter(reg_df, gene_padj < 0.001)
+
+# Try using overlapped genes
+reg_df <- filter(reg_df, is.element(gene, degs_overlaped))
+
+k_tb <- data.frame(row.names = reg_df$gene,
+                   dplyr::select(reg_df,
+                                 gene_FC,
+                                 mir_FC,
+                                 dnam_quot))
+```
+
+
+
+```{r}
+kmeansHeatmap(k_tb, clusters= 12, nstart = 100, GSEA = TRUE,
+              scaled = "scaled",
+              directory = file.path(project_dir, "data/output/TCGA_kmeans_clusters/")
+              )
+```
+
+```{r}
+temp <-  
+  k_tb %>%
+  # filter(is.element(gene, query_ls[[6]])) %>%
+  # select(gene, gene_FC, mir_FC, dnam_quot) %>%
+  mutate(dnam_quot = scale(dnam_quot),
+         mir_FC = scale(mir_FC),
+         gene_FC = scale(gene_FC)) %>%
+  pivot_longer(cols = c(gene_FC, mir_FC, dnam_quot)) 
+
+
+ggplot(data = temp, aes(y = value, x = name)) +
+  geom_boxplot()
+```
+
+
+# Venn
+```{r}
+
+mRNA_DE <- filter(mRNA_res, padj < 0.05) 
+
+mRNA_DE <- filter(mRNA_DE, is.element(rownames(mRNA_DE), degs_overlaped))
+targ_dnam_mRNA_ <- targ_dnam_mRNA %>%
+  filter(adj.P.Val < 0.05)
+
+simple_tb <- 
+  data.frame(genes=rownames(mRNA_DE)) %>%
+  mutate(mir=dplyr::case_when(
+    is.element(genes,targ_mir_mRNA$target_ensembl) ~ 1, TRUE ~ 0)) %>%
+  mutate(dnam=dplyr::case_when(
+    is.element(genes, targ_dnam_mRNA_$ensembl) ~ 1, TRUE ~ 0))
+
+# table of genes under regulation
+table(simple_tb [,c("mir","dnam")])
+
+
+png(file.path(project_dir,"data/output/figures/TCGA_venn.png"), width = 1500, height = 1000)
+venn::venn(x =list(simple_tb[simple_tb$dnam ==1,"genes"],
+             simple_tb[simple_tb$mir ==1,"genes"]), 
+     zcolor = c("#ffdd2f","#ff4d2f"),
+     # zcolor = brewer.pal(8, "Paired")[c(4,8)],
+     snames = c("DNA methylated","microRNA"),
+     opacity = 0.6,
+     sncs = 4,
+     plotsize = 200,
+     box = FALSE,
+     ilcs = 4,
+     borders = FALSE,
+     lty = 1,
+     lwd = 5,
+     col = "white",
+     file= file.path(project_dir,"data/output/figures/TCGA_venn.pdf"))
+dev.off()
+# save.image("outputs/Venn.pdf")
+
+
+venn::venn(x =list("Set1" = simple_tb[simple_tb$dnam ==1,"genes"],
+             "Set2" =simple_tb[simple_tb$mir ==1,"genes"]))
+```
+
+
+# Session Info
+```{r Session info}
+sessionInfo()
+```

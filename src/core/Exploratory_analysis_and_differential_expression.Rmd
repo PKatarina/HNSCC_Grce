@@ -274,7 +274,7 @@ In the next chunk gene set enrichment analysis is preformed on DE mRNA data.
 Most of the significant terms appear to be about muscle contraction. Other terms that appear are signaling, cell-cell communication, immune system processes
 ```{r gsea on DE mRNA}
 # Using only part of sources
-GSEA_SOURCES <- c("GO:BP", "KEGG", "REAC", "TF")
+GSEA_SOURCES <- c("GO:BP", "KEGG", "REAC")
 
 
 # Call on the gost 
@@ -297,7 +297,8 @@ GSEA_terms_to_highlight <-
            header = F)[,1]
 
 publish_gostplot(gostplot(gost_mRNA ,capped = F, interactive = F),
-                 highlight_terms = GSEA_terms_to_highlight)
+                 highlight_terms = GSEA_terms_to_highlight,
+                 filename = file.path(project_dir, "data/output/figures/DE_mRNA_GSEA.tiff"))
 ```
 
 
@@ -329,7 +330,7 @@ gost_mRNA$result$query <- "DE genes vs sequenced genes"
 gostplot(gost_mRNA ,capped = F, interactive = T)
 ```
 
-**HPV effect on cancer**  
+### **HPV effect on cancer**  
 In the next chunk explores the effect of HPV on
 cancer. To be more precise, it explores which genes are DE in HPV in
 cancer. Firstly compare HPV - and controls to get a list of genes that
@@ -352,19 +353,20 @@ mRNA_dds_HPV <- DESeq(mRNA_dds_HPV, betaPrior = T)
 # Contrasting between negative HPV and controls
 res.cN.nN <- 
   #results(mRNA_dds_HPV, contrast=c("HistHPV","cancerN","normalN"), tidy = T)
-  results(mRNA_dds_HPV, contrast=c("HistHPV","cancer0","control0"), tidy = T)
+  results(mRNA_dds_HPV, contrast=c("HistHPV","cancer0","control0"), tidy = F)
 # Contrasting between HPV negative and positive
 res.cP.cN <- 
-  #results(mRNA_dds_HPV, contrast=c("HistHPV","cancerP","cancerN"), tidy = T)
-  results(mRNA_dds_HPV, 
+  # results(mRNA_dds_HPV, contrast=c("HistHPV","cancer1","cancer0"), tidy = T)
+  results(mRNA_dds_HPV,
           contrast=c("HistHPV","cancer1","cancer0"),
           tidy = F)
 
-summary(res.cP.cN, alpha=0.05)
+# summary(res.cP.cN, alpha=0.05)
+summary(res.cP.cN)
 
-res.cP.cN <- 
-  #results(mRNA_dds_HPV, contrast=c("HistHPV","cancerP","cancerN"), tidy = T)
-  results(mRNA_dds_HPV, contrast=c("HistHPV","cancer1","cancer0"), tidy = T)
+# res.cP.cN <- 
+#   #results(mRNA_dds_HPV, contrast=c("HistHPV","cancerP","cancerN"), tidy = T)
+#   results(mRNA_dds_HPV, contrast=c("HistHPV","cancer1","cancer0"), tidy = F)
 
 # selecting significant results
 res.cP.cN <- dplyr::filter(res.cP.cN, padj < 0.1)
@@ -377,6 +379,7 @@ mRNA_res_HPV$symbol <- idMap(mRNA_res_HPV$row, genes_dir)
 head(mRNA_res_HPV)
 
 ```
+
 ```{r}
 write.csv(mRNA_res_HPV, file = file.path(project_dir, "data/processed/mRNA_res_HPV.csv"))
 ```
@@ -650,7 +653,7 @@ hist(mir_DE$log2FoldChange, border="white", col="darkgreen")
 hist(log(mir_DE$baseMean), border="white", col="darkblue")
 ```
 
-**HPV effect on cancer**\
+### **HPV effect on cancer**
 In the next chunk explores the effect of HPV on cancer. To be more
 precise, it explores which genes are DE in HPV in cancer. Firstly
 compare HPV - and controls to get a list of genes that re DE in cancer
@@ -903,30 +906,6 @@ dnam_res_sites <- get.table(diff_meth,
 head(dnam_res)
 ```
 
-```{r}
-dnam_normal_samples <- filter(pheno(rnb_set), Sample_group != "Cancer") %>%
-  pull(Sample_ID) %>%
-  as.vector()
-diff_meth_HPV <- 
-  rnb.execute.computeDiffMeth(remove.samples(rnb_set, dnam_normal_samples),
-                              pheno.cols = "HPV",
-                              region.types = "cpgislands")
-
-
-# Diff methylation table for CpG islands
-dnam_res_HPV <- get.table(diff_meth_HPV,
-                      get.comparisons(diff_meth_HPV)[1],
-                      "cpgislands",
-                      return.data.frame =T)
-
-# Diff methylation table for CpG sites, used for volcano plot
-dnam_res_sites_HPV <- get.table(diff_meth_HPV,
-                      get.comparisons(diff_meth_HPV)[1],
-                      "sites",
-                      return.data.frame =T)
-```
-
-
 Summary statistic of significant cpg island differential methylation.
 ```{r DNAm summary on DM}
 summary(filter(dnam_res, comb.p.adj.fdr < 0.05))
@@ -985,7 +964,7 @@ PVAL.TRESH <- 0.05
 volcano_cols <- c("green","red",  "gray60")
 
 # volcano data frame
-volcano <- data.frame(values(dnam_res_cgi)) %>%
+volcano <- data.frame(values(unique(dnam_res_cgi))) %>%
   dplyr::mutate(diffexpressed = dplyr::case_when(
     padj < PVAL.TRESH & log.quot > LFC.TRESH ~ "Hypermethylated",
     padj < PVAL.TRESH & log.quot < -LFC.TRESH ~ "Hypomethylated",
@@ -1008,19 +987,19 @@ cpg sites are hypomethylated. CpGs with padj \< 0.05 are used for
 construction of histogram
 ```{r DNAm histogram plot on cpgs}
 # Volcano data frame
-dnam_res_sites <- 
-  dplyr::select(dnam_res_sites, 
+dnam_res_sites_df <- 
+  dplyr::select(unique(dnam_res_sites), 
          log.quot="mean.quot.log2",
          pvalue="diffmeth.p.val",
          padj="diffmeth.p.adj.fdr") 
 
-hist(dplyr::filter(dnam_res_sites, padj < 0.05)$log.quot, 
+hist(dplyr::filter(dnam_res_sites_df, padj < 0.05)$log.quot, 
      main="Histogram of CpG sites with padj < 0.05",
      xlab="log.quot",
      col="darkgreen",
      border="white")
 
-volcano <- data.frame((dnam_res_sites)) %>%
+volcano <- data.frame((dnam_res_sites_df)) %>%
   dplyr::mutate(diffexpressed = dplyr::case_when(
     padj < PVAL.TRESH & log.quot > LFC.TRESH ~ "Hypermethylated",
     padj < PVAL.TRESH & log.quot < -LFC.TRESH ~ "Hypomethylated",
@@ -1052,6 +1031,42 @@ gost_DNAm$result$query <- "CGI"
 gostplot(gost_DNAm ,capped = T, interactive = T)
 
 ```
+
+### **HPV effect on cancer**
+```{r}
+dnam_normal_samples <- filter(pheno(rnb_set), Sample_group != "Cancer") %>%
+  pull(Sample_ID) %>%
+  as.vector()
+diff_meth_HPV <- 
+  rnb.execute.computeDiffMeth(remove.samples(rnb_set, dnam_normal_samples),
+                              pheno.cols = "HPV",
+                              region.types = "cpgislands")
+
+
+# Diff methylation table for CpG islands
+dnam_res_HPV <- get.table(diff_meth_HPV,
+                      get.comparisons(diff_meth_HPV)[1],
+                      "cpgislands",
+                      return.data.frame =T)
+
+
+# Diff methylation table for CpG sites, used for volcano plot
+dnam_res_sites_HPV <- get.table(diff_meth_HPV,
+                      get.comparisons(diff_meth_HPV)[1],
+                      "sites",
+                      return.data.frame =T)
+
+
+```
+
+There is no significantly DM CpG sites or CGIs
+```{r}
+table(dnam_res_sites_HPV$diffmeth.p.adj.fdr < 0.1)
+table(dnam_res_HPV$comb.p.adj.fdr < 0.1)
+```
+
+
+
 # Saving
 Preparing tables for exporting 
 ```{r exporting function, eval=FALSE, echo=FALSE}
