@@ -34,15 +34,15 @@ Here is a list of the directories included in this project:
 ## Publication
 
 If you would like to learn more about this project, please refer to our publication: [Integrative analysis in head and neck cancer reveals distinct role of miRNome and methylome as tumour epigenetic drivers
-]. You can find the publication (preprint) [here](https://www.biorxiv.org/content/10.1101/2024.01.11.575141v2).
+]. You can find the preprint of the publication [here](https://www.biorxiv.org/content/10.1101/2024.01.11.575141v2).
 
 ## Related Data
 
-Related data files are deposited on figshare and ArrayExpress:
+Related data files are deposited on Fig share and ArrayExpress: 
 
-    - RNA-seq, transcriptome
-        - [figshare](https://figshare.com/articles/dataset/transcriptome/24721746)
-        - [ArrayExpress](https://www.ebi.ac.uk/biostudies/arrayexpress/studies/E-MTAB-13725)
-    - [miR-seq, miRnome](https://figshare.com/articles/dataset/miRNome/24721731)
-    - [methylome](https://figshare.com/articles/dataset/methylome/24721728)
+- RNA-seq, transcriptome
+    - Fig share - [link](https://figshare.com/articles/dataset/transcriptome/24721746)
+    - ArrayExpress E-MTAB-13725 - [link](https://www.ebi.ac.uk/biostudies/arrayexpress/studies/E-MTAB-13725)
+- miRNA-seq, miRNome - [link](https://figshare.com/articles/dataset/miRNome/24721731)
+- methylome [link](https://figshare.com/articles/dataset/methylome/24721728)
 
